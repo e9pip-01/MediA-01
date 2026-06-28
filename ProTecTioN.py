@@ -1,6 +1,6 @@
 from aiogram import Router, F, Bot, Dispatcher
 from aiogram.types import Message, ChatPermissions, InlineKeyboardMarkup, InlineKeyboardButton, ChatMemberUpdated, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
-from aiogram.filters.chat_member_updated import ChatMemberUpdatedFilter, IS_ADMIN, IS_MEMBER
+from aiogram.filters.chat_member_updated import ChatMemberUpdatedFilter, IS_ADMIN
 from aiogram.filters import CHAT_MEMBER
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -111,15 +111,16 @@ async def user_promoted_to_admin(event: ChatMemberUpdated):
         db_roles[chat_id] = {}
     db_roles[chat_id][user_id] = "مطور"
 
-@router.my_chat_member(ChatMemberUpdatedFilter(member_status_changed=IS_ADMIN >> ~IS_ADMIN))
+@router.my_chat_member()
 async def bot_lost_admin(event: ChatMemberUpdated):
-    chat_id = event.chat.id
-    if chat_id in db_roles: del db_roles[chat_id]
-    if chat_id in bot_disabled_status: del bot_disabled_status[chat_id]
-    if chat_id in custom_commands: del custom_commands[chat_id]
-    if chat_id in muted_users: del muted_users[chat_id]
-    if chat_id in banned_users: del banned_users[chat_id]
-    if chat_id in restricted_users: del restricted_users[chat_id]
+    if event.new_chat_member.status not in ["administrator", "creator"]:
+        chat_id = event.chat.id
+        if chat_id in db_roles: del db_roles[chat_id]
+        if chat_id in bot_disabled_status: del bot_disabled_status[chat_id]
+        if chat_id in custom_commands: del custom_commands[chat_id]
+        if chat_id in muted_users: del muted_users[chat_id]
+        if chat_id in banned_users: del banned_users[chat_id]
+        if chat_id in restricted_users: del restricted_users[chat_id]
 
 @router.message(F.chat.type.in_({"group", "supergroup"}), F.text.in_({"تفعيل", "تعطيل"}))
 async def toggle_bot(message: Message, bot: Bot):
