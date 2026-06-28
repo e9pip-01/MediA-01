@@ -1,13 +1,34 @@
+import os
+import sys
+import math
+import asyncio
 from aiogram import Router, F, Bot, Dispatcher
-from aiogram.types import Message, ChatPermissions, InlineKeyboardMarkup, InlineKeyboardButton, ChatMemberUpdated, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from aiogram.types import Message, ChatPermissions, InlineKeyboardMarkup, InlineKeyboardButton, ChatMemberUpdated, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, ReactionTypeEmoji
 from aiogram.filters.chat_member_updated import ChatMemberUpdatedFilter, IS_ADMIN
 from aiogram.filters import CHAT_MEMBER
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-import math
-import asyncio
-import os
-import sys
+
+async def main():
+    token = os.getenv("BOT_TOKEN")
+    if not token:
+        sys.exit(1)
+    bot = Bot(token=token)
+    dp = Dispatcher()
+    dp.include_router(router)
+    try:
+        startup_msg = await bot.send_message(
+            chat_id=8597653867,
+            text="اشتغل البوت مرتلخ تاج راسي\nارضع عيرك ؟!"
+        )
+        await bot.set_message_reaction(
+            chat_id=8597653867,
+            message_id=startup_msg.message_id,
+            reaction=[ReactionTypeEmoji(emoji="😭")]
+        )
+    except Exception:
+        pass
+    await dp.start_polling(bot)
 
 router = Router()
 
@@ -176,7 +197,7 @@ async def add_command_start(message: Message, state: FSMContext, bot: Bot):
     await state.set_state(CommandAliasState.waiting_for_old_command)
     await state.update_data(origin_msg_id=message.message_id, bot_msg_id=sent.message_id, user_id=message.from_user.id)
 
-@router.message(CommandAliasState.waiting_for_old_command, F.chat.type.in_({"group", "supergroup"}))
+@router.message(CommandAliasState.waiting_for_old_command, F.chat.type.in_({"group", "supergroup"}), F.text)
 async def add_command_old(message: Message, state: FSMContext, bot: Bot):
     data = await state.get_data()
     if message.from_user.id != data.get("user_id"):
@@ -205,7 +226,7 @@ async def add_command_old(message: Message, state: FSMContext, bot: Bot):
     await state.set_state(CommandAliasState.waiting_for_new_name)
     await state.update_data(actual_base=actual_base, bot_msg_id=sent.message_id, origin_msg_id=message.message_id, user_id=message.from_user.id)
 
-@router.message(CommandAliasState.waiting_for_new_name, F.chat.type.in_({"group", "supergroup"}))
+@router.message(CommandAliasState.waiting_for_new_name, F.chat.type.in_({"group", "supergroup"}), F.text)
 async def add_command_new(message: Message, state: FSMContext, bot: Bot):
     data = await state.get_data()
     if message.from_user.id != data.get("user_id"):
@@ -242,7 +263,7 @@ async def delete_command_start(message: Message, state: FSMContext, bot: Bot):
     await state.set_state(CommandAliasState.waiting_for_delete_command)
     await state.update_data(origin_msg_id=message.message_id, bot_msg_id=sent.message_id, user_id=message.from_user.id)
 
-@router.message(CommandAliasState.waiting_for_delete_command, F.chat.type.in_({"group", "supergroup"}))
+@router.message(CommandAliasState.waiting_for_delete_command, F.chat.type.in_({"group", "supergroup"}), F.text)
 async def delete_command_exec(message: Message, state: FSMContext, bot: Bot):
     data = await state.get_data()
     if message.from_user.id != data.get("user_id"):
@@ -479,13 +500,11 @@ async def clear_num_messages(message: Message, bot: Bot):
     ])
     await bot.send_message(chat_id=chat_id, text=f"تم تنظيف {count} من رسايل الشات\nتدلل عيني", reply_markup=blue_keyboard)
 
-@router.message(F.chat.type.in_({"group", "supergroup"}))
+@router.message(F.chat.type.in_({"group", "supergroup"}), F.text)
 async def main_group_handler(message: Message, bot: Bot, state: FSMContext):
     current_state = await state.get_state()
     if current_state in [CommandAliasState.waiting_for_old_command, CommandAliasState.waiting_for_new_name, CommandAliasState.waiting_for_delete_command]:
-        data = await state.get_data()
-        if message.from_user.id == data.get("user_id"):
-            return
+        return
     if bot_disabled_status.get(message.chat.id, False): return
     text = message.text
     chat_id = message.chat.id
@@ -604,5 +623,5 @@ async def main_group_handler(message: Message, bot: Bot, state: FSMContext):
         response_text = f"تم {action_performed} هذا المنيوج عزيزي / {mention_sender}"
         await message.reply(response_text, reply_markup=green_keyboard, parse_mode="Markdown")
 
-async def main():
-    token = os.
+if __name__ == "__main__":
+    asyncio.run(main())

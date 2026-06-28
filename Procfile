@@ -1,1 +1,1 @@
-python3 ProTecTioN.py
+web: python3 ProTecTioN.py
