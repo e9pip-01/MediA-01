@@ -1,1 +1,1 @@
-worker: python ProTecTioN.py
+python ProTecTioN.py
