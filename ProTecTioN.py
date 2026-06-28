@@ -1,6 +1,6 @@
 from aiogram import Router, F, Bot, Dispatcher
 from aiogram.types import Message, ChatPermissions, InlineKeyboardMarkup, InlineKeyboardButton, ChatMemberUpdated, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
-from aiogram.filters.chat_member_updated import ChatMemberUpdatedFilter, IS_ADMIN, IS_NOT_ADMIN
+from aiogram.filters.chat_member_updated import ChatMemberUpdatedFilter, IS_ADMIN, IS_MEMBER
 from aiogram.filters import CHAT_MEMBER
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -111,7 +111,7 @@ async def user_promoted_to_admin(event: ChatMemberUpdated):
         db_roles[chat_id] = {}
     db_roles[chat_id][user_id] = "مطور"
 
-@router.my_chat_member(ChatMemberUpdatedFilter(member_status_changed=IS_ADMIN >> IS_NOT_ADMIN))
+@router.my_chat_member(ChatMemberUpdatedFilter(member_status_changed=IS_ADMIN >> ~IS_ADMIN))
 async def bot_lost_admin(event: ChatMemberUpdated):
     chat_id = event.chat.id
     if chat_id in db_roles: del db_roles[chat_id]
@@ -328,7 +328,7 @@ async def send_paginated_list(message: Message, user_list: list, title: str, pag
     current_items = user_list[start_idx:end_idx]
 
     for i, uid in enumerate(current_items, start=start_idx + 1):
-        text += f"#{i} [{uid}](tg://user?id={uid})\n"
+        text += f"*{i} [{uid}](tg://user?id={uid})\n"
 
     buttons = []
     if total_pages > 1 and page < total_pages - 1:
