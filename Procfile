@@ -1,1 +1,1 @@
-web: python3 ProTecTioN.py
+worker: python bot.py

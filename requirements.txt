@@ -1,5 +1,8 @@
-aiogram
+python-telegram-bot
+yt-dlp
+uvloop
+httpx
 aiohttp
+cryptography
+cachetools
 aiofiles
-asyncio
-requests
