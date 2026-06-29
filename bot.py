@@ -2,6 +2,7 @@ import os
 import re
 import asyncio
 import random
+import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 import yt_dlp
@@ -13,6 +14,7 @@ except ImportError:
     pass
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
+YOUTUBE_API_KEY = "AIzaSyAygsyNL_uvqgXferYoNNoqwM7-7twMCY0"
 DEV_ID = 8597653867
 
 user_states = {}
@@ -22,6 +24,7 @@ button_name = "اشترك"
 REACTIONS = ["😘", "😡", "🥰", "🍌", "🍓", "😭", "🤗", "🤣"]
 last_reactions = {}
 bot_audio_messages = {}
+song_cache = {}
 
 async def add_unique_reaction(message, chat_id):
     await asyncio.sleep(3)
@@ -150,11 +153,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             asyncio.create_task(add_unique_reaction(update.message, chat_id))
             keyboard = [["تعيين الرابط", "تغيير اسم الزر"]]
             reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
-            await send_animated_text(
-                update, context, 
-                "تريد تغير اسم الزر دوس تغيير اسم الزر\nتريد تعين رابط الزر دوس تعيين الرابط", 
-                reply_markup=reply_markup
+            
+            msg = await update.message.reply_text(
+                "تريد تغير اسم الزر دوس تغيير اسم الزر\nتريد تعين رابط الزر دوس تعيين الرابط",
+                reply_markup=reply_markup,
+                reply_to_message_id=update.message.message_id
             )
+            asyncio.create_task(add_unique_reaction(msg, chat_id))
+            
             await send_animated_text(update, context, "🫦", is_emoji=True)
             return
         else:
@@ -232,6 +238,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await send_dynamic_reply(update, context)
 
+def search_youtube_api(query):
+    url = "https://www.googleapis.com/youtube/v3/search"
+    params = {
+        "part": "snippet",
+        "q": query,
+        "maxResults": 1,
+        "type": "video",
+        "key": YOUTUBE_API_KEY
+    }
+    try:
+        response = requests.get(url, params=params).json()
+        if "items" in response and len(response["items"]) > 0:
+            video_id = response["items"][0]["id"]["videoId"]
+            video_title = response["items"][0]["snippet"]["title"]
+            return f"https://www.youtube.com/watch?v={video_id}", video_title
+    except:
+        return None, None
+    return None, None
+
 async def process_youtube_search(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
     global channel_link, button_name
     chat_id = update.message.chat_id
@@ -240,15 +265,54 @@ async def process_youtube_search(update: Update, context: ContextTypes.DEFAULT_T
     if not match:
         return
 
-    search_query = match.group(1).strip()
+    search_query = match.group(1).strip().lower()
+    is_group = update.message.chat.type in ['group', 'supergroup']
+    reply_markup = None
     
+    if is_group and channel_link:
+        keyboard = [[InlineKeyboardButton(button_name, url=channel_link)]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+    if search_query in song_cache:
+        try:
+            cached_file_id = song_cache[search_query]["file_id"]
+            cached_title = song_cache[search_query]["title"]
+            
+            audio_msg = await update.message.reply_voice(
+                voice=cached_file_id,
+                caption=cached_title,
+                reply_markup=reply_markup,
+                reply_to_message_id=update.message.message_id
+            )
+            asyncio.create_task(add_unique_reaction(audio_msg, chat_id))
+            
+            if chat_id not in bot_audio_messages:
+                bot_audio_messages[chat_id] = []
+            bot_audio_messages[chat_id].append(audio_msg.message_id)
+            return
+        except:
+            pass
+
     status_message = await send_animated_text(update, context, "يتم العثور على الاغنيه مولاي\nماتنتظر فدوا")
     emoji_message = await send_animated_text(update, context, "🫦", is_emoji=True)
 
+    video_url, video_title = search_youtube_api(search_query)
+    
+    if not video_url:
+        try:
+            await status_message.delete()
+            await emoji_message.delete()
+        except:
+            pass
+        keyboard_dev = [[InlineKeyboardButton("المطور", url="tg://user?id=8597653867", style="destructive")]]
+        reply_markup_dev = InlineKeyboardMarkup(keyboard_dev)
+        await send_animated_text(update, context, "لم يتم العثور على طلبك اسفه الك\nيبعد كسي", reply_markup=reply_markup_dev)
+        await send_animated_text(update, context, "🫦", is_emoji=True)
+        return
+
     ydl_opts = {
         'format': 'bestaudio/best',
-        'default_search': 'ytsearch1',
-        'outtmpl': '%(title)s.ogg',
+        'outtmpl': '%(title)s.%(ext)s',
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'vorbis',
@@ -257,29 +321,35 @@ async def process_youtube_search(update: Update, context: ContextTypes.DEFAULT_T
         'socket_timeout': 15,
         'http_chunk_size': 1048576,
         'external_downloader': 'curl_cffi',
-        'extractor_args': {'youtube': {'player_client': ['ios', 'android']}}
     }
     
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(search_query, download=True)
+            info = ydl.extract_info(video_url, download=True)
             video_info = info['entries'][0] if 'entries' in info else info
             audio_filename = ydl.prepare_filename(video_info)
-
-        is_group = update.message.chat.type in ['group', 'supergroup']
-        reply_markup = None
-        
-        if is_group and channel_link:
-            keyboard = [[InlineKeyboardButton(button_name, url=channel_link)]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            base, ext = os.path.splitext(audio_filename)
+            if ext != '.ogg':
+                final_filename = f"{base}.ogg"
+                if os.path.exists(final_filename):
+                    os.remove(final_filename)
+                os.rename(audio_filename, final_filename)
+            else:
+                final_filename = audio_filename
 
         audio_msg = await update.message.reply_voice(
-            voice=open(audio_filename, 'rb'), 
-            caption=video_info.get('title'), 
+            voice=open(final_filename, 'rb'), 
+            caption=video_title, 
             reply_markup=reply_markup,
             reply_to_message_id=update.message.message_id
         )
         asyncio.create_task(add_unique_reaction(audio_msg, chat_id))
+        
+        song_cache[search_query] = {
+            "file_id": audio_msg.voice.file_id,
+            "title": video_title
+        }
         
         if chat_id not in bot_audio_messages:
             bot_audio_messages[chat_id] = []
@@ -287,7 +357,7 @@ async def process_youtube_search(update: Update, context: ContextTypes.DEFAULT_T
         
         await status_message.delete()
         await emoji_message.delete()
-        os.remove(audio_filename)
+        os.remove(final_filename)
 
     except Exception as e:
         print(f"Error: {e}")
@@ -297,13 +367,15 @@ async def process_youtube_search(update: Update, context: ContextTypes.DEFAULT_T
         except:
             pass
 
-        keyboard = [[InlineKeyboardButton("المطور", url="tg://user?id=8597653867", style="destructive")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        keyboard_dev = [[InlineKeyboardButton("المطور", url="tg://user?id=8597653867", style="destructive")]]
+        reply_markup_dev = InlineKeyboardMarkup(keyboard_dev)
         
-        await send_animated_text(update, context, "لم يتم العثور على طلبك اسفه الك\nيبعد كسي", reply_markup=reply_markup)
+        await send_animated_text(update, context, "لم يتم العثور على طلبك اسفه الك\nيبعد كسي", reply_markup=reply_markup_dev)
         await send_animated_text(update, context, "🫦", is_emoji=True)
         
-        if 'audio_filename' in locals() and os.path.exists(audio_filename):
+        if 'final_filename' in locals() and os.path.exists(final_filename):
+            os.remove(final_filename)
+        elif 'audio_filename' in locals() and os.path.exists(audio_filename):
             os.remove(audio_filename)
 
 def main():
