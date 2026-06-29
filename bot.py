@@ -278,9 +278,9 @@ async def process_youtube_search(update: Update, context: ContextTypes.DEFAULT_T
             cached_file_id = song_cache[search_query]["file_id"]
             cached_title = song_cache[search_query]["title"]
             
-            audio_msg = await update.message.reply_audio(
-                audio=cached_file_id,
-                title=cached_title,
+            audio_msg = await update.message.reply_voice(
+                voice=cached_file_id,
+                caption=cached_title,
                 reply_markup=reply_markup,
                 reply_to_message_id=update.message.message_id
             )
@@ -338,16 +338,16 @@ async def process_youtube_search(update: Update, context: ContextTypes.DEFAULT_T
             else:
                 final_filename = audio_filename
 
-        audio_msg = await update.message.reply_audio(
-            audio=open(final_filename, 'rb'), 
-            title=video_title, 
+        audio_msg = await update.message.reply_voice(
+            voice=open(final_filename, 'rb'), 
+            caption=video_title, 
             reply_markup=reply_markup,
             reply_to_message_id=update.message.message_id
         )
         asyncio.create_task(add_unique_reaction(audio_msg, chat_id))
         
         song_cache[search_query] = {
-            "file_id": audio_msg.audio.file_id,
+            "file_id": audio_msg.voice.file_id,
             "title": video_title
         }
         
