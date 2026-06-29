@@ -54,6 +54,16 @@ async def send_animated_text(update: Update, context: ContextTypes.DEFAULT_TYPE,
     chat_id = update.message.chat_id
     words = full_text.split()
     
+    if is_emoji and full_text == "🫦":
+        msg = await update.message.reply_text(
+            "🫦", 
+            reply_markup=reply_markup,
+            reply_to_message_id=update.message.message_id
+        )
+        asyncio.create_task(add_unique_reaction(msg, chat_id))
+        asyncio.create_task(handle_emoji_animation(msg, chat_id))
+        return msg
+
     if len(words) <= 3 or is_emoji:
         msg = await update.message.reply_text(
             full_text, 
@@ -61,8 +71,6 @@ async def send_animated_text(update: Update, context: ContextTypes.DEFAULT_TYPE,
             reply_to_message_id=update.message.message_id
         )
         asyncio.create_task(add_unique_reaction(msg, chat_id))
-        if is_emoji and full_text == "👉🏻🫦":
-            asyncio.create_task(handle_emoji_animation(msg, chat_id))
         return msg
 
     chunks = []
@@ -102,11 +110,11 @@ async def send_dynamic_reply(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     if state == 0:
         await send_animated_text(update, context, "تفضل\nكول يوت ثم اذكر اسم الاغنيه وراح توصلك")
-        await send_animated_text(update, context, "👉🏻🫦", is_emoji=True)
+        await send_animated_text(update, context, "🫦", is_emoji=True)
         user_states[user_id] = {'chat_state': 1}
     else:
         await send_animated_text(update, context, "مو ناوي تستعملني مثل البوتات ؟!\nترى اضوج منك")
-        await send_animated_text(update, context, "👉🏻🫦", is_emoji=True)
+        await send_animated_text(update, context, "🫦", is_emoji=True)
         user_states[user_id] = {'chat_state': 0}
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -134,7 +142,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await send_animated_text(update, context, f"تم مسح {deleted_count} من الصوتيات\nلان امرتني مولاي", reply_markup=reply_markup)
-        await send_animated_text(update, context, "👉🏻🫦", is_emoji=True)
+        await send_animated_text(update, context, "🫦", is_emoji=True)
         return
 
     if text == "ادت":
@@ -147,7 +155,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "تريد تغير اسم الزر دوس تغيير اسم الزر\nتريد تعين رابط الزر دوس تعيين الرابط", 
                 reply_markup=reply_markup
             )
-            await send_animated_text(update, context, "👉🏻🫦", is_emoji=True)
+            await send_animated_text(update, context, "🫦", is_emoji=True)
             return
         else:
             if is_group:
@@ -166,11 +174,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if is_url or is_username:
                 channel_link = text if not is_username else f"https://t.me/{text[1:]}"
                 await send_animated_text(update, context, "تم تعيين زر الاشتراك العلني تدلل\nءمهمواح")
-                await send_animated_text(update, context, "👉🏻🫦", is_emoji=True)
+                await send_animated_text(update, context, "🫦", is_emoji=True)
                 user_states[user_id] = {'chat_state': 0}
             else:
                 await send_animated_text(update, context, "اهو ليش تمضرط وياي مو راح اضوج\nلاتعيدها مولاي")
-                await send_animated_text(update, context, "👉🏻🫦", is_emoji=True)
+                await send_animated_text(update, context, "🫦", is_emoji=True)
                 user_states[user_id] = {'chat_state': 0}
             return
 
@@ -179,11 +187,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if len(words) <= 3:
                 button_name = text
                 await send_animated_text(update, context, "غيرت الاسم بدون مشاكل يبعدي انه\nغير يدلل مولاي")
-                await send_animated_text(update, context, "👉🏻🫦", is_emoji=True)
+                await send_animated_text(update, context, "🫦", is_emoji=True)
                 user_states[user_id] = {'chat_state': 0}
             else:
                 await send_animated_text(update, context, "الاسم اطول من المسموح به ثلاث كلمات\nك اقصى طول")
-                await send_animated_text(update, context, "👉🏻🫦", is_emoji=True)
+                await send_animated_text(update, context, "🫦", is_emoji=True)
                 user_states[user_id] = {'chat_state': 0}
             return
 
@@ -196,7 +204,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=ReplyKeyboardRemove(),
                 reply_to_message_id=update.message.message_id
             )
-            await send_animated_text(update, context, "👉🏻🫦", is_emoji=True)
+            await send_animated_text(update, context, "🫦", is_emoji=True)
             return
         elif text == "تغيير اسم الزر":
             asyncio.create_task(add_unique_reaction(update.message, chat_id))
@@ -206,7 +214,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=ReplyKeyboardRemove(),
                 reply_to_message_id=update.message.message_id
             )
-            await send_animated_text(update, context, "👉🏻🫦", is_emoji=True)
+            await send_animated_text(update, context, "🫦", is_emoji=True)
             return
 
     if is_group:
@@ -235,7 +243,7 @@ async def process_youtube_search(update: Update, context: ContextTypes.DEFAULT_T
     search_query = match.group(1).strip()
     
     status_message = await send_animated_text(update, context, "يتم العثور على الاغنيه مولاي\nماتنتظر فدوا")
-    emoji_message = await send_animated_text(update, context, "👉🏻🫦", is_emoji=True)
+    emoji_message = await send_animated_text(update, context, "🫦", is_emoji=True)
 
     ydl_opts = {
         'format': 'bestaudio/best',
@@ -245,7 +253,11 @@ async def process_youtube_search(update: Update, context: ContextTypes.DEFAULT_T
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'vorbis',
         }],
-        'quiet': True
+        'quiet': True,
+        'socket_timeout': 15,
+        'http_chunk_size': 1048576,
+        'external_downloader': 'curl_cffi',
+        'extractor_args': {'youtube': {'player_client': ['ios', 'android']}}
     }
     
     try:
@@ -289,7 +301,7 @@ async def process_youtube_search(update: Update, context: ContextTypes.DEFAULT_T
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await send_animated_text(update, context, "لم يتم العثور على طلبك اسفه الك\nيبعد كسي", reply_markup=reply_markup)
-        await send_animated_text(update, context, "👉🏻🫦", is_emoji=True)
+        await send_animated_text(update, context, "🫦", is_emoji=True)
         
         if 'audio_filename' in locals() and os.path.exists(audio_filename):
             os.remove(audio_filename)
