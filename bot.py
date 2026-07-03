@@ -3,7 +3,7 @@ import re
 import asyncio
 import random
 import time
-import aiohttp
+import sqlite3
 import aiofiles
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
@@ -11,16 +11,8 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 import yt_dlp
 
-try:
-    import uvloop
-    asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
-except ImportError:
-    pass
-
-
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 DEV_ID = 8597653867
-
 
 DEFAULT_CHANNEL = "tg://user?id=3454506837"
 channel_link = ""
@@ -29,22 +21,81 @@ button_name_2 = "سلوى وبس"
 subscribe_btn_name = "اشترك بالقناة"
 REACTIONS = ["😘", "😡", "🥰", "🍓", "😭", "🤗", "🤣"]
 
-
-user_states = {}
 last_reactions = {}
 bot_audio_messages = {}
-song_cache = {}
 
 router = Router()
 
+def init_db():
+    conn = sqlite3.connect("bot_database.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            chat_state INTEGER DEFAULT 0,
+            action TEXT DEFAULT NULL
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS cache (
+            cache_key TEXT PRIMARY KEY,
+            file_id TEXT,
+            title TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+init_db()
+
+def get_user_state(user_id: int) -> dict:
+    conn = sqlite3.connect("bot_database.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT chat_state, action FROM users WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return {"chat_state": row[0], "action": row[1]}
+    return {"chat_state": 0, "action": None}
+
+def update_user_state(user_id: int, chat_state: int, action: str = None):
+    conn = sqlite3.connect("bot_database.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO users (user_id, chat_state, action)
+        VALUES (?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET chat_state = ?, action = ?
+    """, (user_id, chat_state, action, chat_state, action))
+    conn.commit()
+    conn.close()
+
+def get_cached_song(cache_key: str) -> dict:
+    conn = sqlite3.connect("bot_database.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT file_id, title FROM cache WHERE cache_key = ?", (cache_key,))
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return {"file_id": row[0], "title": row[1]}
+    return None
+
+def set_cached_song(cache_key: str, file_id: str, title: str):
+    conn = sqlite3.connect("bot_database.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO cache (cache_key, file_id, title)
+        VALUES (?, ?, ?)
+        ON CONFLICT(cache_key) DO UPDATE SET file_id = ?, title = ?
+    """, (cache_key, file_id, title, file_id, title))
+    conn.commit()
+    conn.close()
 
 def get_attached_buttons():
     keyboard = [
-        [InlineKeyboardButton(text=button_name_1, url="tg://user?id=8597653867", style="destructive")],
+        [InlineKeyboardButton(text=button_name_1, url="tg://user?id=8597653867", style="danger")],
         [InlineKeyboardButton(text=button_name_2, url="tg://user?id=3454506837", style="primary")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
-
 
 def get_subscribe_button():
     target_url = channel_link.strip() if channel_link else DEFAULT_CHANNEL
@@ -52,10 +103,9 @@ def get_subscribe_button():
         target_url = f"https://t.me/{target_url.replace('@', '')}"
     
     keyboard = [
-        [InlineKeyboardButton(text=subscribe_btn_name, url=target_url, style="destructive")]
+        [InlineKeyboardButton(text=subscribe_btn_name, url=target_url, style="danger")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
-
 
 def filter_title(title: str) -> str:
     res = []
@@ -70,7 +120,6 @@ def filter_title(title: str) -> str:
             res.append(lower_char)
             
     return "".join(res)
-
 
 async def check_subscription(bot: Bot, user_id: int) -> bool:
     if user_id == DEV_ID:
@@ -89,14 +138,12 @@ async def check_subscription(bot: Bot, user_id: int) -> bool:
     except:
         return True
 
-
 async def add_banana_reaction(message: Message):
     await asyncio.sleep(1.5)
     try:
         await message.react(reaction=[{"type": "emoji", "emoji": "🍌"}])
     except:
         pass
-
 
 async def add_unique_reaction(message: Message):
     await asyncio.sleep(3)
@@ -118,7 +165,6 @@ async def add_unique_reaction(message: Message):
         await message.react(reaction=[{"type": "emoji", "emoji": chosen}])
     except:
         pass
-
 
 async def send_animated_text(message: Message, full_text: str, reply_markup=None, is_emoji=False, trigger_early_emoji=True, attach_global_buttons=True, custom_inline_markup=None):
     if is_emoji and full_text == "🫦":
@@ -177,38 +223,32 @@ async def send_animated_text(message: Message, full_text: str, reply_markup=None
             pass
 
         if trigger_early_emoji and not emoji_triggered:
-            asyncio.create_task(send_animated_text(message, "🫦", is_emoji=True, reply_markup=reply_markup, attach_global_buttons=False, custom_inline_markup=None))
+            asyncio.create_task(send_animated_text(message, "🫦", is_emoji=True, reply_markup=None, attach_global_buttons=False, custom_inline_markup=None))
             emoji_triggered = True
-            
-    if trigger_early_emoji and not emoji_triggered:
-        asyncio.create_task(send_animated_text(message, "🫦", is_emoji=True, reply_markup=reply_markup, attach_global_buttons=False, custom_inline_markup=None))
+
+    if custom_inline_markup:
+        final_markup = custom_inline_markup
+    else:
+        final_markup = get_attached_buttons() if attach_global_buttons else None
 
     try:
-        if custom_inline_markup:
-            markup_to_send = custom_inline_markup
-        else:
-            markup_to_send = get_attached_buttons() if attach_global_buttons else None
-        await base_msg.edit_reply_markup(reply_markup=markup_to_send)
+        await base_msg.edit_reply_markup(reply_markup=final_markup)
     except:
         pass
 
     return base_msg
 
-
 async def send_dynamic_reply(message: Message):
     user_id = message.from_user.id
-    current_user_state = user_states.get(user_id, {})
-    state = current_user_state.get('chat_state', 0)
+    current_state = get_user_state(user_id)
+    state_val = current_state.get('chat_state', 0)
     
-    if state == 0:
+    if state_val == 0:
         await send_animated_text(message, "تفضل\nكول يوت ثم اذكر اسم الاغنيه وراح توصلك", trigger_early_emoji=True)
-        current_user_state['chat_state'] = 1
-        user_states[user_id] = current_user_state
+        update_user_state(user_id, chat_state=1, action=current_state.get('action'))
     else:
         await send_animated_text(message, "مو ناوي تستعملني مثل البوتات ؟!\nترى اضوج منك", trigger_early_emoji=True)
-        current_user_state['chat_state'] = 0
-        user_states[user_id] = current_user_state
-
+        update_user_state(user_id, chat_state=0, action=current_state.get('action'))
 
 def make_progress_hook(loop, bot, chat_id, message_id):
     state = {
@@ -233,11 +273,10 @@ def make_progress_hook(loop, bot, chat_id, message_id):
                         
                         text = f"يتم العثور على الاغنيه مولاي\nماتنتظر فدوا {percent_num}%"
                         asyncio.run_coroutine_threadsafe(
-                            bot.edit_text(chat_id=chat_id, message_id=message_id, text=text),
+                            bot.edit_text(chat_id=chat_id, message_id=message_id, text=text, reply_markup=None),
                             loop
                         )
     return hook
-
 
 def download_video_sync(ydl_opts, target_input):
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -246,14 +285,14 @@ def download_video_sync(ydl_opts, target_input):
         filename = ydl.prepare_filename(video_info)
         return filename
 
-
 async def process_youtube_download(message: Message, target_input: str, cache_key: str):
     chat_id = message.chat.id
+    cached_song = get_cached_song(cache_key)
 
-    if cache_key in song_cache:
+    if cached_song:
         try:
-            cached_file_id = song_cache[cache_key]["file_id"]
-            cached_title = song_cache[cache_key]["title"]
+            cached_file_id = cached_song["file_id"]
+            cached_title = cached_song["title"]
             
             audio_msg = await message.reply_document(
                 document=cached_file_id,
@@ -323,10 +362,7 @@ async def process_youtube_download(message: Message, target_input: str, cache_ke
         )
         asyncio.create_task(add_unique_reaction(audio_msg))
         
-        song_cache[cache_key] = {
-            "file_id": audio_msg.document.file_id,
-            "title": filtered_title
-        }
+        set_cached_song(cache_key, audio_msg.document.file_id, filtered_title)
         
         if chat_id not in bot_audio_messages:
             bot_audio_messages[chat_id] = []
@@ -349,11 +385,9 @@ async def process_youtube_download(message: Message, target_input: str, cache_ke
             except:
                 pass
 
-
 @router.callback_query(F.data.startswith("btn_"))
 async def handle_callback_buttons(callback: CallbackQuery):
     await callback.answer()
-
 
 @router.message(F.text)
 async def handle_message(message: Message):
@@ -375,7 +409,7 @@ async def handle_message(message: Message):
         except:
             pass
 
-    current_user_state = user_states.get(user_id, {})
+    current_user_state = get_user_state(user_id)
     current_action = current_user_state.get('action')
 
     if user_id != DEV_ID:
@@ -411,14 +445,31 @@ async def handle_message(message: Message):
             asyncio.create_task(add_unique_reaction(message))
     
     if is_private and user_id == DEV_ID and text == "الغاء":
-        user_states[user_id] = {'chat_state': 0}
+        update_user_state(user_id, chat_state=0, action=None)
         await send_animated_text(message, "صار دادي ماراح اغير او اسوي شي\nءمهمواح", reply_markup=ReplyKeyboardRemove(), trigger_early_emoji=True, attach_global_buttons=False)
         return
 
     if is_private and user_id == DEV_ID and current_action == 'wait_link':
-        channel_link = text
-        await send_animated_text(message, "تم تعيين زر الاشتراك العلني تدلل\nءمهمواح", reply_markup=ReplyKeyboardRemove(), trigger_early_emoji=True, attach_global_buttons=False)
-        user_states[user_id] = {'chat_state': 0}
+        is_valid = False
+        
+        if text.startswith("https://") or text.startswith("t.me/") or text.startswith("tg://"):
+            is_valid = True
+            
+        elif text.isdigit():
+            if 6 <= len(text) <= 12:
+                is_valid = True
+                
+        else:
+            username_part = text[1:] if text.startswith("@") else text
+            if re.match(r'^[a-zA-Z][a-zA-Z0-9_]*$', username_part):
+                is_valid = True
+
+        if is_valid:
+            channel_link = text
+            await send_animated_text(message, "تم تعيين زر الاشتراك العلني تدلل\nءمهمواح", reply_markup=ReplyKeyboardRemove(), trigger_early_emoji=True, attach_global_buttons=False)
+            update_user_state(user_id, chat_state=0, action=None)
+        else:
+            await send_animated_text(message, "اهو ليش تمضرط وياي\nيلا من تصير انسان تعال اسولف وياك" reply_markup=ReplyKeyboardRemove(), trigger_early_emoji=True, attach_global_buttons=False)
         return
 
     elif is_private and user_id == DEV_ID and current_action in ['wait_name_btn1', 'wait_name_btn2', 'wait_name_sub']:
@@ -431,10 +482,10 @@ async def handle_message(message: Message):
             elif current_action == 'wait_name_sub':
                 subscribe_btn_name = text
             await send_animated_text(message, "غيرت الاسم بدون مشاكل يبعدي انه\nغير يدلل مولاي", reply_markup=ReplyKeyboardRemove(), trigger_early_emoji=True, attach_global_buttons=False)
-            user_states[user_id] = {'chat_state': 0}
+            update_user_state(user_id, chat_state=0, action=None)
         else:
             await send_animated_text(message, "الاسم اطول من المسموح به ثلاث كلمات\nك اقصى طول", reply_markup=ReplyKeyboardRemove(), trigger_early_emoji=True, attach_global_buttons=False)
-            user_states[user_id] = {'chat_state': 0}
+            update_user_state(user_id, chat_state=0, action=None)
         return
 
     if text == "تنظيف":
@@ -453,7 +504,7 @@ async def handle_message(message: Message):
             await send_animated_text(message, f"تم مسح {deleted_count} من الصوتيات\nلان امرتني مولاي", trigger_early_emoji=True, attach_global_buttons=False)
         return
 
-    if is_private and user_id == DEV_ID and text == "ادت":
+    if is_private and user_id == DEV_ID and text == "دت":
         keyboard = [
             [KeyboardButton(text="تعيين الرابط"), KeyboardButton(text="عرض الاشتراك")],
             [KeyboardButton(text="تغيير اسم الزر")],
@@ -483,7 +534,7 @@ async def handle_message(message: Message):
             return
 
         elif text == "تعيين الرابط":
-            user_states[user_id] = {'action': 'wait_link'}
+            update_user_state(user_id, chat_state=current_user_state.get('chat_state', 0), action='wait_link')
             await send_animated_text(message, "ارسل يوزر / رابط القناة او الكروب\nيلا مولاي", reply_markup=ReplyKeyboardRemove(), trigger_early_emoji=True, attach_global_buttons=False)
             return
             
@@ -504,17 +555,17 @@ async def handle_message(message: Message):
             return
 
         elif text == "رب العالمين" and current_action is None:
-            user_states[user_id] = {'action': 'wait_name_btn1'}
+            update_user_state(user_id, chat_state=current_user_state.get('chat_state', 0), action='wait_name_btn1')
             await send_animated_text(message, "شتريد اسم الزر المرفق وي الرسايل\nيصير تاج راسي", reply_markup=ReplyKeyboardRemove(), trigger_early_emoji=True, attach_global_buttons=False)
             return
 
         elif text == "سلوى وبس" and current_action is None:
-            user_states[user_id] = {'action': 'wait_name_btn2'}
+            update_user_state(user_id, chat_state=current_user_state.get('chat_state', 0), action='wait_name_btn2')
             await send_animated_text(message, "شتريد اسم الزر المرفق وي الرسايل\nيصير تاج راسي", reply_markup=ReplyKeyboardRemove(), trigger_early_emoji=True, attach_global_buttons=False)
             return
 
         elif text == subscribe_btn_name and current_action is None:
-            user_states[user_id] = {'action': 'wait_name_sub'}
+            update_user_state(user_id, chat_state=current_user_state.get('chat_state', 0), action='wait_name_sub')
             await send_animated_text(message, "شتريد اسم الزر المرفق وي الرسايل\nيصير تاج راسي", reply_markup=ReplyKeyboardRemove(), trigger_early_emoji=True, attach_global_buttons=False)
             return
 
@@ -526,7 +577,8 @@ async def handle_message(message: Message):
         match = re.match(r'^يوت\s+(.+)$', text)
         if match:
             search_query = match.group(1).strip().lower()
-            if search_query in song_cache:
+            cached_song = get_cached_song(search_query)
+            if cached_song:
                 await process_youtube_download(message, None, search_query)
             else:
                 yt_search_query = f"ytsearch1:{search_query}"
@@ -540,7 +592,6 @@ async def handle_message(message: Message):
 
     if is_private:
         await send_dynamic_reply(message)
-
 
 async def main():
     if not TOKEN:
