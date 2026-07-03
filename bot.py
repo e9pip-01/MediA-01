@@ -25,6 +25,7 @@ DEV_ID = 8597653867
 channel_link = "tg://user?id=3454506837"
 button_name_1 = "رب العالمين"
 button_name_2 = "سلوى وبس"
+subscribe_btn_name = "اشترك بالقناة"
 REACTIONS = ["😘", "😡", "🥰", "🍓", "😭", "🤗", "🤣"]
 
 
@@ -50,7 +51,7 @@ def get_subscribe_button():
         target_url = f"https://t.me/{target_url.replace('@', '')}"
     
     keyboard = [
-        [InlineKeyboardButton(text="اشترك بالقناة", url=target_url)]
+        [InlineKeyboardButton(text=subscribe_btn_name, url=target_url)]
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
@@ -117,7 +118,7 @@ async def add_unique_reaction(message: Message):
         pass
 
 
-async def send_animated_text(message: Message, full_text: str, reply_markup=None, is_emoji=False, trigger_early_emoji=False, attach_global_buttons=True, custom_inline_markup=None):
+async def send_animated_text(message: Message, full_text: str, reply_markup=None, is_emoji=False, trigger_early_emoji=True, attach_global_buttons=True, custom_inline_markup=None):
     if is_emoji and full_text == "🫦":
         msg = await message.reply(text="🫦", reply_markup=reply_markup)
         asyncio.create_task(add_unique_reaction(msg))
@@ -181,11 +182,14 @@ async def send_animated_text(message: Message, full_text: str, reply_markup=None
         asyncio.create_task(send_animated_text(message, "🫦", is_emoji=True, reply_markup=None, attach_global_buttons=False, custom_inline_markup=None))
 
     try:
-        if custom_inline_markup:
-            markup_to_send = custom_inline_markup
+        if reply_markup:
+            await base_msg.edit_text(text=full_text, reply_markup=reply_markup)
         else:
-            markup_to_send = get_attached_buttons() if attach_global_buttons else None
-        await base_msg.edit_reply_markup(reply_markup=markup_to_send)
+            if custom_inline_markup:
+                markup_to_send = custom_inline_markup
+            else:
+                markup_to_send = get_attached_buttons() if attach_global_buttons else None
+            await base_msg.edit_reply_markup(reply_markup=markup_to_send)
     except:
         pass
 
@@ -266,13 +270,12 @@ async def process_youtube_download(message: Message, target_input: str, cache_ke
         except:
             pass
 
-    status_message = await send_animated_text(message, "يتم العثور على الاغنيه مولاي\nماتنتظر فدوا", attach_global_buttons=False)
-    emoji_message = await send_animated_text(message, "🫦", is_emoji=True, attach_global_buttons=False)
+    status_message = await send_animated_text(message, "يتم العثور على الاغنيه مولاي\nماتنتظر فدوا", attach_global_buttons=False, trigger_early_emoji=True)
 
     loop = asyncio.get_running_loop()
     progress_hook = make_progress_hook(loop, message.bot, chat_id, status_message.message_id)
 
-    user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, healthiest Gecko) Chrome/150.0.0.0 Safari/537.36'
+    user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36'
 
     ydl_opts = {
         'format': 'bestaudio/best',
@@ -331,17 +334,14 @@ async def process_youtube_download(message: Message, target_input: str, cache_ke
         bot_audio_messages[chat_id].append(audio_msg.message_id)
         
         await status_message.delete()
-        await emoji_message.delete()
 
     except Exception as e:
         try:
             await status_message.delete()
-            await emoji_message.delete()
         except:
             pass
 
-        await send_animated_text(message, "لم يتم العثور على طلبك اسفه الك\nيبعد كسي")
-        await send_animated_text(message, "🫦", is_emoji=True, attach_global_buttons=False)
+        await send_animated_text(message, "لم يتم العثور على طلبك اسفه الك\nيبعد كسي", trigger_early_emoji=True)
         
     finally:
         if audio_filename and os.path.exists(audio_filename):
@@ -358,7 +358,7 @@ async def handle_callback_buttons(callback: CallbackQuery):
 
 @router.message(F.text)
 async def handle_message(message: Message):
-    global channel_link, button_name_1, button_name_2
+    global channel_link, button_name_1, button_name_2, subscribe_btn_name
     user_id = message.from_user.id
     chat_id = message.chat.id
     text = message.text.strip()
@@ -385,7 +385,7 @@ async def handle_message(message: Message):
             await send_animated_text(
                 message=message,
                 full_text="اشترك بالقناة لو ماراح يشتغل وياك البوت\nضروري عيني",
-                reply_markup=ReplyKeyboardRemove(),
+                reply_markup=None,
                 trigger_early_emoji=True,
                 attach_global_buttons=False,
                 custom_inline_markup=get_subscribe_button()
@@ -422,13 +422,15 @@ async def handle_message(message: Message):
         user_states[user_id] = {'chat_state': 0}
         return
 
-    elif is_private and user_id == DEV_ID and current_action in ['wait_name_btn1', 'wait_name_btn2']:
+    elif is_private and user_id == DEV_ID and current_action in ['wait_name_btn1', 'wait_name_btn2', 'wait_name_sub']:
         words = text.split()
         if len(words) <= 3:
             if current_action == 'wait_name_btn1':
                 button_name_1 = text
-            else:
+            elif current_action == 'wait_name_btn2':
                 button_name_2 = text
+            elif current_action == 'wait_name_sub':
+                subscribe_btn_name = text
             await send_animated_text(message, "غيرت الاسم بدون مشاكل يبعدي انه\nغير يدلل مولاي", reply_markup=ReplyKeyboardRemove(), trigger_early_emoji=True, attach_global_buttons=False)
             user_states[user_id] = {'chat_state': 0}
         else:
@@ -464,6 +466,7 @@ async def handle_message(message: Message):
             message=message,
             full_text="تريد تغير اسم الزر دوس تغيير اسم الزر\nتريد تعين رابط الزر دوس تعيين الرابط",
             reply_markup=reply_markup,
+            trigger_early_emoji=True,
             attach_global_buttons=False
         )
         return
@@ -488,26 +491,32 @@ async def handle_message(message: Message):
         elif text == "تغيير اسم الزر":
             sub_keyboard = [
                 [KeyboardButton(text="رب العالمين"), KeyboardButton(text="سلوى وبس")],
-                [KeyboardButton(text="الغاء")]
+                [KeyboardButton(text=subscribe_btn_name), KeyboardButton(text="الغاء")]
             ]
             sub_reply_markup = ReplyKeyboardMarkup(keyboard=sub_keyboard, resize_keyboard=True, one_time_keyboard=True)
             
             await send_animated_text(
                 message=message,
-                full_text="اختار الزر الي تريد تغير اسمه من القائمة السفلية",
+                full_text="اسماء الازرار مكتوبات يم الكيبورد\nيا زر تريد تبدل اسمه بدله",
                 reply_markup=sub_reply_markup,
+                trigger_early_emoji=True,
                 attach_global_buttons=False
             )
             return
 
         elif text == "رب العالمين" and current_action is None:
             user_states[user_id] = {'action': 'wait_name_btn1'}
-            await send_animated_text(message, "شتريد اسم الزر المرفق وي الرسايل\nيصير تاج راسي", reply_markup=ReplyKeyboardRemove(), attach_global_buttons=False)
+            await send_animated_text(message, "شتريد اسم الزر المرفق وي الرسايل\nيصير تاج راسي", reply_markup=ReplyKeyboardRemove(), trigger_early_emoji=True, attach_global_buttons=False)
             return
 
         elif text == "سلوى وبس" and current_action is None:
             user_states[user_id] = {'action': 'wait_name_btn2'}
-            await send_animated_text(message, "شتريد اسم الزر المرفق وي الرسايل\nيصير تاج راسي", reply_markup=ReplyKeyboardRemove(), attach_global_buttons=False)
+            await send_animated_text(message, "شتريد اسم الزر المرفق وي الرسايل\nيصير تاج راسي", reply_markup=ReplyKeyboardRemove(), trigger_early_emoji=True, attach_global_buttons=False)
+            return
+
+        elif text == subscribe_btn_name and current_action is None:
+            user_states[user_id] = {'action': 'wait_name_sub'}
+            await send_animated_text(message, "شتريد اسم الزر المرفق وي الرسايل\nيصير تاج راسي", reply_markup=ReplyKeyboardRemove(), trigger_early_emoji=True, attach_global_buttons=False)
             return
 
     if is_youtube_url:
