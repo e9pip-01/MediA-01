@@ -19,7 +19,6 @@ except ImportError:
 
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
-YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 DEV_ID = 8597653867
 
 
@@ -118,19 +117,10 @@ async def add_unique_reaction(message: Message):
         pass
 
 
-async def handle_emoji_animation(message: Message):
-    await asyncio.sleep(3)
-    try:
-        await message.edit_text("👉🏻🫦")
-    except:
-        pass
-
-
 async def send_animated_text(message: Message, full_text: str, reply_markup=None, is_emoji=False, trigger_early_emoji=False, attach_global_buttons=True, custom_inline_markup=None):
     if is_emoji and full_text == "🫦":
         msg = await message.reply(text="🫦", reply_markup=reply_markup)
         asyncio.create_task(add_unique_reaction(msg))
-        asyncio.create_task(handle_emoji_animation(msg))
         return msg
 
     lines = full_text.split('\n')
@@ -217,28 +207,6 @@ async def send_dynamic_reply(message: Message):
         user_states[user_id] = current_user_state
 
 
-async def search_youtube_api(query):
-    url = "https://www.googleapis.com/youtube/v3/search"
-    params = {
-        "part": "snippet",
-        "q": query,
-        "maxResults": 1,
-        "type": "video",
-        "key": YOUTUBE_API_KEY
-    }
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, params=params) as response:
-                res_json = await response.json()
-                if "items" in res_json and len(res_json["items"]) > 0:
-                    video_id = res_json["items"][0]["id"]["videoId"]
-                    video_title = res_json["items"][0]["snippet"]["title"]
-                    return f"https://www.youtube.com/watch?v={video_id}", video_title
-    except:
-        return None, None
-    return None, None
-
-
 def make_progress_hook(loop, bot, chat_id, message_id):
     state = {
         'last_update_time': 0,
@@ -268,15 +236,15 @@ def make_progress_hook(loop, bot, chat_id, message_id):
     return hook
 
 
-def download_video_sync(ydl_opts, video_url):
+def download_video_sync(ydl_opts, target_input):
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(video_url, download=True)
+        info = ydl.extract_info(target_input, download=True)
         video_info = info['entries'][0] if 'entries' in info else info
         filename = ydl.prepare_filename(video_info)
         return filename
 
 
-async def process_youtube_download(message: Message, target_url: str, cache_key: str):
+async def process_youtube_download(message: Message, target_input: str, cache_key: str):
     chat_id = message.chat.id
 
     if cache_key in song_cache:
@@ -304,7 +272,7 @@ async def process_youtube_download(message: Message, target_url: str, cache_key:
     loop = asyncio.get_running_loop()
     progress_hook = make_progress_hook(loop, message.bot, chat_id, status_message.message_id)
 
-    user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36'
+    user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, healthiest Gecko) Chrome/150.0.0.0 Safari/537.36'
 
     ydl_opts = {
         'format': 'bestaudio/best',
@@ -320,7 +288,7 @@ async def process_youtube_download(message: Message, target_url: str, cache_key:
             'User-Agent': user_agent,
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.9',
-            'Sec-Ch-Ua': '"Google Chrome";v="144", "Not=A?Brand";v="8", "Chromium";v="144"',
+            'Sec-Ch-Ua': '"Google Chrome";v="150", "Not=A?Brand";v="8", "Chromium";v="150"',
             'Sec-Ch-Ua-Mobile': '?0',
             'Sec-Ch-Ua-Platform': '"Windows"',
         },
@@ -330,7 +298,7 @@ async def process_youtube_download(message: Message, target_url: str, cache_key:
     audio_filename = None
     
     try:
-        audio_filename = await loop.run_in_executor(None, download_video_sync, ydl_opts, target_url)
+        audio_filename = await loop.run_in_executor(None, download_video_sync, ydl_opts, target_input)
         
         base_name, original_ext = os.path.splitext(os.path.basename(audio_filename))
         filtered_title = filter_title(base_name)
@@ -553,19 +521,8 @@ async def handle_message(message: Message):
             if search_query in song_cache:
                 await process_youtube_download(message, None, search_query)
             else:
-                status_message = await send_animated_text(message, "يتم العثور على الاغنيه مولاي\nماتنتظر فدوا", attach_global_buttons=False)
-                emoji_message = await send_animated_text(message, "🫦", is_emoji=True, attach_global_buttons=False)
-                video_url, video_title = await search_youtube_api(search_query)
-                try:
-                    await status_message.delete()
-                    await emoji_message.delete()
-                except:
-                    pass
-                if video_url:
-                    await process_youtube_download(message, video_url, search_query)
-                else:
-                    await send_animated_text(message, "لم يتم العثور على طلبك اسفه الك\nيبعد كسي")
-                    await send_animated_text(message, "🫦", is_emoji=True, attach_global_buttons=False)
+                yt_search_query = f"ytsearch1:{search_query}"
+                await process_youtube_download(message, yt_search_query, search_query)
         return
 
     if is_group:
