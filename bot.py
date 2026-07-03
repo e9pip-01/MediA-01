@@ -70,7 +70,7 @@ async def handle_emoji_animation(message: Message):
     except:
         pass
 
-async def send_animated_text(message: Message, full_text: str, reply_markup=None, is_emoji=False, delayed_reply_markup=None):
+async def send_animated_text(message: Message, full_text: str, reply_markup=None, is_emoji=False, delayed_reply_markup=None, trigger_early_emoji=False):
     if is_emoji and full_text == "🫦":
         msg = await message.reply(
             text="🫦", 
@@ -119,6 +119,8 @@ async def send_animated_text(message: Message, full_text: str, reply_markup=None
     )
     asyncio.create_task(add_unique_reaction(base_msg))
 
+    emoji_triggered = False
+
     for step in range(1, total_steps):
         await asyncio.sleep(0.3)
         current_lines = []
@@ -135,6 +137,10 @@ async def send_animated_text(message: Message, full_text: str, reply_markup=None
         except:
             pass
 
+        if trigger_early_emoji and not emoji_triggered:
+            asyncio.create_task(send_animated_text(message, "🫦", is_emoji=True))
+            emoji_triggered = True
+
     if final_reply_markup:
         try:
             await base_msg.edit_reply_markup(reply_markup=final_reply_markup)
@@ -149,13 +155,11 @@ async def send_dynamic_reply(message: Message):
     state = current_user_state.get('chat_state', 0)
     
     if state == 0:
-        await send_animated_text(message, "تفضل\nكول يوت ثم اذكر اسم الاغنيه وراح توصلك")
-        await send_animated_text(message, "🫦", is_emoji=True)
+        await send_animated_text(message, "تفضل\nكول يوت ثم اذكر اسم الاغنيه وراح توصلك", trigger_early_emoji=True)
         current_user_state['chat_state'] = 1
         user_states[user_id] = current_user_state
     else:
-        await send_animated_text(message, "مو ناوي تستعملني مثل البوتات ؟!\nترى اضوج منك")
-        await send_animated_text(message, "🫦", is_emoji=True)
+        await send_animated_text(message, "مو ناوي تستعملني مثل البوتات ؟!\nترى اضوج منك", trigger_early_emoji=True)
         current_user_state['chat_state'] = 0
         user_states[user_id] = current_user_state
 
@@ -224,7 +228,7 @@ async def process_youtube_search(message: Message, text: str):
         except:
             keyboard_dev = [[InlineKeyboardButton(text="المطور", url=f"tg://user?id={DEV_ID}", style=style_dev_error)]]
             reply_markup_dev = InlineKeyboardMarkup(inline_keyboard=keyboard_dev)
-            await send_animated_text(message, "لم يتم العثور على طلبك اسفه الك\nيبعد كسي", reply_markup=reply_markup_dev)
+            await send_animated_text(message, "لم يتم العثور على طلبك اسفه الك\nيبعد كسي", reply_markup=keyboard_dev)
             await send_animated_text(message, "🫦", is_emoji=True)
             return
 
@@ -345,8 +349,7 @@ async def handle_message(message: Message):
     
     if is_private and user_id == DEV_ID and text == "الغاء":
         user_states[user_id] = {'chat_state': 0}
-        await send_animated_text(message, "صار دادي ماراح اغير او اسوي شي\nءمهمواح", reply_markup=ReplyKeyboardRemove())
-        await send_animated_text(message, "🫦", is_emoji=True)
+        await send_animated_text(message, "صار دادي ماراح اغير او اسوي شي\nءمهمواح", reply_markup=ReplyKeyboardRemove(), trigger_early_emoji=True)
         return
 
     if is_private and user_id == DEV_ID and current_action == 'wait_link':
@@ -355,12 +358,10 @@ async def handle_message(message: Message):
         
         if is_url or is_username:
             channel_link = text if not is_username else f"https://t.me/{text[1:]}"
-            await send_animated_text(message, "تم تعيين زر الاشتراك العلني تدلل\nءمهمواح")
-            await send_animated_text(message, "🫦", is_emoji=True)
+            await send_animated_text(message, "تم تعيين زر الاشتراك العلني تدلل\nءمهمواح", trigger_early_emoji=True)
             user_states[user_id] = {'chat_state': 0}
         else:
-            await send_animated_text(message, "اهو ليش تمضرط وياي مو راح اضوج\nلاتعيدها مولاي")
-            await send_animated_text(message, "🫦", is_emoji=True)
+            await send_animated_text(message, "اهو ليش تمضرط وياي مو راح اضوج\nلاتعيدها مولاي", trigger_early_emoji=True)
             user_states[user_id] = {'chat_state': 0}
         return
 
@@ -368,12 +369,10 @@ async def handle_message(message: Message):
         words = text.split()
         if len(words) <= 3:
             button_name = text
-            await send_animated_text(message, "غيرت الاسم بدون مشاكل يبعدي انه\nغير يدلل مولاي")
-            await send_animated_text(message, "🫦", is_emoji=True)
+            await send_animated_text(message, "غيرت الاسم بدون مشاكل يبعدي انه\nغير يدلل مولاي", trigger_early_emoji=True)
             user_states[user_id] = {'chat_state': 0}
         else:
-            await send_animated_text(message, "الاسم اطول من المسموح به ثلاث كلمات\nك اقصى طول")
-            await send_animated_text(message, "🫦", is_emoji=True)
+            await send_animated_text(message, "الاسم اطول من المسموح به ثلاث كلمات\nك اقصى طول", trigger_early_emoji=True)
             user_states[user_id] = {'chat_state': 0}
         return
 
@@ -407,8 +406,7 @@ async def handle_message(message: Message):
                 style_dev_error = chosen_color
                 
             user_states[user_id] = {'chat_state': 0}
-            await send_animated_text(message, "تم تعيين لون الزر المطلوب مثل ماتريد\nمولاي وغصبا عليه اطيعك", reply_markup=ReplyKeyboardRemove())
-            await send_animated_text(message, "🫦", is_emoji=True)
+            await send_animated_text(message, "تم تعيين لون الزر المطلوب مثل ماتريد\nمولاي وغصبا عليه اطيعك", reply_markup=ReplyKeyboardRemove(), trigger_early_emoji=True)
             return
 
     if text == "تنظيف":
@@ -428,8 +426,7 @@ async def handle_message(message: Message):
             keyboard = [[InlineKeyboardButton(text="رب العالمين", url=f"tg://user?id={DEV_ID}", style=style_dev_clean)]]
             reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
             
-            await send_animated_text(message, f"تم مسح {deleted_count} من الصوتيات\nلان امرتني مولاي", reply_markup=reply_markup)
-            await send_animated_text(message, "🫦", is_emoji=True)
+            await send_animated_text(message, f"تم مسح {deleted_count} من الصوتيات\nلان امرتني مولاي", reply_markup=reply_markup, trigger_early_emoji=True)
         return
 
     if is_private and user_id == DEV_ID and text == "ادت":
@@ -460,13 +457,11 @@ async def handle_message(message: Message):
     if is_private and user_id == DEV_ID:
         if text == "تعيين الرابط":
             user_states[user_id] = {'action': 'wait_link'}
-            await send_animated_text(message, "ارسل يوزر / رابط القناة او الكروب\nيلا مولاي")
-            await send_animated_text(message, "🫦", is_emoji=True)
+            await send_animated_text(message, "ارسل يوزر / رابط القناة او الكروب\nيلا مولاي", trigger_early_emoji=True)
             return
         elif text == "تغيير اسم الزر":
             user_states[user_id] = {'action': 'wait_name'}
-            await send_animated_text(message, "شتريد اسم الزر المرفق وي الرسايل\nيصير تاج راسي")
-            await send_animated_text(message, "🫦", is_emoji=True)
+            await send_animated_text(message, "شتريد اسم الزر المرفق وي الرسايل\nيصير تاج راسي", trigger_early_emoji=True)
             return
 
     if text.startswith("يوت"):
