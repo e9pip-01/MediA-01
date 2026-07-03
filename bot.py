@@ -4,12 +4,19 @@ import asyncio
 import random
 import time
 import sqlite3
+import aiohttp
 import aiofiles
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 import yt_dlp
+
+try:
+    import uvloop
+    asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+except ImportError:
+    pass
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 DEV_ID = 8597653867
@@ -92,7 +99,7 @@ def set_cached_song(cache_key: str, file_id: str, title: str):
 
 def get_attached_buttons():
     keyboard = [
-        [InlineKeyboardButton(text=button_name_1, url="tg://user?id=8597653867", style="danger")],
+        [InlineKeyboardButton(text=button_name_1, url="tg://user?id=8597653867", style="destructive")],
         [InlineKeyboardButton(text=button_name_2, url="tg://user?id=3454506837", style="primary")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -103,7 +110,7 @@ def get_subscribe_button():
         target_url = f"https://t.me/{target_url.replace('@', '')}"
     
     keyboard = [
-        [InlineKeyboardButton(text=subscribe_btn_name, url=target_url, style="danger")]
+        [InlineKeyboardButton(text=subscribe_btn_name, url=target_url, style="destructive")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
@@ -225,6 +232,9 @@ async def send_animated_text(message: Message, full_text: str, reply_markup=None
         if trigger_early_emoji and not emoji_triggered:
             asyncio.create_task(send_animated_text(message, "🫦", is_emoji=True, reply_markup=None, attach_global_buttons=False, custom_inline_markup=None))
             emoji_triggered = True
+            
+    if trigger_early_emoji and not emoji_triggered:
+        asyncio.create_task(send_animated_text(message, "🫦", is_emoji=True, reply_markup=None, attach_global_buttons=False, custom_inline_markup=None))
 
     if custom_inline_markup:
         final_markup = custom_inline_markup
@@ -450,26 +460,9 @@ async def handle_message(message: Message):
         return
 
     if is_private and user_id == DEV_ID and current_action == 'wait_link':
-        is_valid = False
-        
-        if text.startswith("https://") or text.startswith("t.me/") or text.startswith("tg://"):
-            is_valid = True
-            
-        elif text.isdigit():
-            if 6 <= len(text) <= 12:
-                is_valid = True
-                
-        else:
-            username_part = text[1:] if text.startswith("@") else text
-            if re.match(r'^[a-zA-Z][a-zA-Z0-9_]*$', username_part):
-                is_valid = True
-
-        if is_valid:
-            channel_link = text
-            await send_animated_text(message, "تم تعيين زر الاشتراك العلني تدلل\nءمهمواح", reply_markup=ReplyKeyboardRemove(), trigger_early_emoji=True, attach_global_buttons=False)
-            update_user_state(user_id, chat_state=0, action=None)
-        else:
-            await send_animated_text(message, "اهو ليش تمضرط وياي\nيلا من تصير انسان تعال اسولف وياك" reply_markup=ReplyKeyboardRemove(), trigger_early_emoji=True, attach_global_buttons=False)
+        channel_link = text
+        await send_animated_text(message, "تم تعيين زر الاشتراك العلني تدلل\nءمهمواح", reply_markup=ReplyKeyboardRemove(), trigger_early_emoji=True, attach_global_buttons=False)
+        update_user_state(user_id, chat_state=0, action=None)
         return
 
     elif is_private and user_id == DEV_ID and current_action in ['wait_name_btn1', 'wait_name_btn2', 'wait_name_sub']:
@@ -504,7 +497,7 @@ async def handle_message(message: Message):
             await send_animated_text(message, f"تم مسح {deleted_count} من الصوتيات\nلان امرتني مولاي", trigger_early_emoji=True, attach_global_buttons=False)
         return
 
-    if is_private and user_id == DEV_ID and text == "دت":
+    if is_private and user_id == DEV_ID and text == "ادت":
         keyboard = [
             [KeyboardButton(text="تعيين الرابط"), KeyboardButton(text="عرض الاشتراك")],
             [KeyboardButton(text="تغيير اسم الزر")],
