@@ -133,8 +133,6 @@ async def send_dynamic_reply(message: Message):
     user_id = message.from_user.id
     state = user_states.get(user_id, {}).get('chat_state', 0)
     
-    asyncio.create_task(add_unique_reaction(message))
-    
     if state == 0:
         await send_animated_text(message, "تفضل\nكول يوت ثم اذكر اسم الاغنيه وراح توصلك")
         await send_animated_text(message, "🫦", is_emoji=True)
@@ -303,17 +301,31 @@ async def handle_message(message: Message):
     is_group = message.chat.type in ['group', 'supergroup']
     is_private = message.chat.type == 'private'
     
+    is_admin_or_dev = False
+    if user_id == DEV_ID:
+        is_admin_or_dev = True
+    elif is_group:
+        try:
+            member = await message.chat.get_member(user_id)
+            if member.status in ['administrator', 'creator']:
+                is_admin_or_dev = True
+        except:
+            pass
+
+    if is_private:
+        asyncio.create_task(add_unique_reaction(message))
+    elif is_group and is_admin_or_dev:
+        asyncio.create_task(add_unique_reaction(message))
+
     current_action = user_states.get(user_id, {}).get('action')
     
     if is_private and user_id == DEV_ID and text == "الغاء":
-        asyncio.create_task(add_unique_reaction(message))
         user_states[user_id] = {'chat_state': 0}
         await message.reply(text="صار دادي ماراح اغير او اسوي شي\nءمهمواح", reply_markup=ReplyKeyboardRemove())
         await message.reply(text="🫦")
         return
 
     if is_private and user_id == DEV_ID and current_action == 'wait_link':
-        asyncio.create_task(add_unique_reaction(message))
         is_url = re.match(r'^(https?://)?(t\.me|telegram\.me)/[a-zA-Z0-9_]+/?$', text)
         is_username = re.match(r'^@[a-zA-Z0-9_]+$', text)
         
@@ -329,7 +341,6 @@ async def handle_message(message: Message):
         return
 
     elif is_private and user_id == DEV_ID and current_action == 'wait_name':
-        asyncio.create_task(add_unique_reaction(message))
         words = text.split()
         if len(words) <= 3:
             button_name = text
@@ -344,7 +355,6 @@ async def handle_message(message: Message):
 
     elif is_private and user_id == DEV_ID and current_action == 'wait_color_selection':
         if text in [button_name, "رب العالمين", "المطور"]:
-            asyncio.create_task(add_unique_reaction(message))
             target_map = {button_name: "channel", "رب العالمين": "dev_clean", "المطور": "dev_error"}
             user_states[user_id]['target_btn'] = target_map[text]
             user_states[user_id]['action'] = 'apply_color'
@@ -359,7 +369,6 @@ async def handle_message(message: Message):
 
     elif is_private and user_id == DEV_ID and current_action == 'apply_color':
         if text in ["🟢", "🔴", "🔵"]:
-            asyncio.create_task(add_unique_reaction(message))
             target_btn = user_states[user_id].get('target_btn')
             color_map = {"🟢": "green", "🔴": "destructive", "🔵": "primary"}
             chosen_color = color_map[text]
@@ -377,19 +386,7 @@ async def handle_message(message: Message):
             return
 
     if text == "تنظيف":
-        can_clean = False
-        if is_private and user_id == DEV_ID:
-            can_clean = True
-        elif is_group:
-            try:
-                member = await message.chat.get_member(user_id)
-                if member.status in ['administrator', 'creator']:
-                    can_clean = True
-            except:
-                pass
-                
-        if can_clean:
-            asyncio.create_task(add_unique_reaction(message))
+        if is_admin_or_dev:
             messages_to_clean = bot_audio_messages.get(chat_id, [])
             deleted_count = 0
             
@@ -410,7 +407,6 @@ async def handle_message(message: Message):
         return
 
     if is_private and user_id == DEV_ID and text == "ادت":
-        asyncio.create_task(add_unique_reaction(message))
         keyboard = [
             [KeyboardButton(text="تعيين الرابط"), KeyboardButton(text="تغيير اسم الزر")],
             [KeyboardButton(text="تغيير لون الزر")]
@@ -425,7 +421,6 @@ async def handle_message(message: Message):
         return
 
     if is_private and user_id == DEV_ID and text == "تغيير لون الزر":
-        asyncio.create_task(add_unique_reaction(message))
         user_states[user_id] = {'action': 'wait_color_selection'}
         keyboard = [
             [KeyboardButton(text=button_name), KeyboardButton(text="رب العالمين"), KeyboardButton(text="المطور")],
@@ -438,32 +433,29 @@ async def handle_message(message: Message):
 
     if is_private and user_id == DEV_ID:
         if text == "تعيين الرابط":
-            asyncio.create_task(add_unique_reaction(message))
             user_states[user_id] = {'action': 'wait_link'}
             await message.reply(text="ارسل يوزر / رابط القناة او الكروب\nيلا مولاي", reply_markup=ReplyKeyboardRemove())
             await send_animated_text(message, "🫦", is_emoji=True)
             return
         elif text == "تغيير اسم الزر":
-            asyncio.create_task(add_unique_reaction(message))
             user_states[user_id] = {'action': 'wait_name'}
             await message.reply(text="شتريد اسم الزر المرفق وي الرسايل\nيصير تاج راسي", reply_markup=ReplyKeyboardRemove())
             await send_animated_text(message, "🫦", is_emoji=True)
             return
 
-    if is_group:
-        if text == "بوت":
-            await send_dynamic_reply(message)
-        elif text.startswith("يوت "):
-            asyncio.create_task(add_unique_reaction(message))
-            await process_youtube_search(message, text)
-        return
-
     if text.startswith("يوت"):
-        asyncio.create_task(add_unique_reaction(message))
+        if is_group and not text.startswith("يوت "):
+            return
         await process_youtube_search(message, text)
         return
 
-    await send_dynamic_reply(message)
+    if is_group:
+        if text == "بوت":
+            await send_dynamic_reply(message)
+        return
+
+    if is_private:
+        await send_dynamic_reply(message)
 
 async def main():
     if not TOKEN:
