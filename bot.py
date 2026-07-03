@@ -178,7 +178,7 @@ async def search_youtube_api(query):
 
 
 def make_progress_hook(loop, bot, chat_id, message_id):
-    last_percent = ["0%"]
+    last_percent = [""]
     
     def hook(d):
         if d['status'] == 'downloading':
@@ -186,11 +186,11 @@ def make_progress_hook(loop, bot, chat_id, message_id):
             downloaded = d.get('downloaded_bytes', 0)
             if total:
                 percent_num = int(downloaded / total * 100)
-                percent_str = f"{percent_num}%"
+                percent_str = f" {percent_num}%"
                 
                 if percent_str != last_percent[0]:
                     last_percent[0] = percent_str
-                    text = f"يتم العثور على الاغنيه مولاي\nماتنتظر فدوا {percent_str}"
+                    text = f"يتم العثور على الاغنيه مولاي\nماتنتظر فدوا{percent_str}"
                     asyncio.run_coroutine_threadsafe(
                         bot.edit_text(chat_id=chat_id, message_id=message_id, text=text),
                         loop
@@ -234,7 +234,7 @@ async def process_youtube_search(message: Message, text: str):
             await send_animated_text(message, "🫦", is_emoji=True)
             return
 
-    status_message = await send_animated_text(message, "يتم العثور على الاغنيه مولاي\nماتنتظر فدوا 0%")
+    status_message = await send_animated_text(message, "يتم العثور على الاغنيه مولاي\nماتنتظر فدوا")
     emoji_message = await send_animated_text(message, "🫦", is_emoji=True)
 
     video_url, video_title = await search_youtube_api(search_query)
@@ -271,6 +271,9 @@ async def process_youtube_search(message: Message, text: str):
         'progress_hooks': [progress_hook],
     }
     
+    audio_filename = None
+    final_filename = None
+    
     try:
         audio_filename = await loop.run_in_executor(None, download_video_sync, ydl_opts, video_url)
         
@@ -304,7 +307,6 @@ async def process_youtube_search(message: Message, text: str):
         
         await status_message.delete()
         await emoji_message.delete()
-        os.remove(final_filename)
 
     except Exception as e:
         try:
@@ -316,10 +318,17 @@ async def process_youtube_search(message: Message, text: str):
         await send_animated_text(message, "لم يتم العثور على طلبك اسفه الك\nيبعد كسي")
         await send_animated_text(message, "🫦", is_emoji=True)
         
-        if 'final_filename' in locals() and os.path.exists(final_filename):
-            os.remove(final_filename)
-        elif 'audio_filename' in locals() and os.path.exists(audio_filename):
-            os.remove(audio_filename)
+    finally:
+        if final_filename and os.path.exists(final_filename):
+            try:
+                os.remove(final_filename)
+            except:
+                pass
+        if audio_filename and os.path.exists(audio_filename):
+            try:
+                os.remove(audio_filename)
+            except:
+                pass
 
 
 @router.message(F.text)
