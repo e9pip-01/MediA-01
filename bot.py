@@ -177,6 +177,27 @@ async def search_youtube_api(query):
     return None, None
 
 
+def make_progress_hook(loop, bot, chat_id, message_id):
+    last_percent = ["0%"]
+    
+    def hook(d):
+        if d['status'] == 'downloading':
+            total = d.get('total_bytes') or d.get('total_bytes_estimate')
+            downloaded = d.get('downloaded_bytes', 0)
+            if total:
+                percent_num = int(downloaded / total * 100)
+                percent_str = f"{percent_num}%"
+                
+                if percent_str != last_percent[0]:
+                    last_percent[0] = percent_str
+                    text = f"يتم العثور على الاغنيه مولاي\nماتنتظر فدوا {percent_str}"
+                    asyncio.run_coroutine_threadsafe(
+                        bot.edit_text(chat_id=chat_id, message_id=message_id, text=text),
+                        loop
+                    )
+    return hook
+
+
 def download_video_sync(ydl_opts, video_url):
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(video_url, download=True)
@@ -213,7 +234,7 @@ async def process_youtube_search(message: Message, text: str):
             await send_animated_text(message, "🫦", is_emoji=True)
             return
 
-    status_message = await send_animated_text(message, "يتم العثور على الاغنيه مولاي\nماتنتظر فدوا")
+    status_message = await send_animated_text(message, "يتم العثور على الاغنيه مولاي\nماتنتظر فدوا 0%")
     emoji_message = await send_animated_text(message, "🫦", is_emoji=True)
 
     video_url, video_title = await search_youtube_api(search_query)
@@ -228,6 +249,9 @@ async def process_youtube_search(message: Message, text: str):
         await send_animated_text(message, "🫦", is_emoji=True)
         return
 
+    loop = asyncio.get_running_loop()
+    progress_hook = make_progress_hook(loop, message.bot, chat_id, status_message.message_id)
+
     ydl_opts = {
         'format': 'bestaudio/best',
         'outtmpl': '%(title)s.%(ext)s',
@@ -235,10 +259,10 @@ async def process_youtube_search(message: Message, text: str):
         'socket_timeout': 15,
         'http_chunk_size': 1048576,
         'external_downloader': 'curl_cffi',
+        'progress_hooks': [progress_hook],
     }
     
     try:
-        loop = asyncio.get_running_loop()
         audio_filename = await loop.run_in_executor(None, download_video_sync, ydl_opts, video_url)
         
         base, ext = os.path.splitext(audio_filename)
