@@ -3,7 +3,8 @@ yt-dlp
 aiohttp
 aiofiles
 uvloop
-curl-cffi
+curl_cffi
 certifi
 aiodns
 Brotli
+h2

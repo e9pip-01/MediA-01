@@ -22,7 +22,8 @@ TOKEN = os.getenv("TELEGRAM_TOKEN")
 DEV_ID = 8597653867
 
 
-channel_link = "tg://user?id=3454506837"
+DEFAULT_CHANNEL = "tg://user?id=3454506837"
+channel_link = ""
 button_name_1 = "رب العالمين"
 button_name_2 = "سلوى وبس"
 subscribe_btn_name = "اشترك بالقناة"
@@ -39,19 +40,19 @@ router = Router()
 
 def get_attached_buttons():
     keyboard = [
-        [InlineKeyboardButton(text=button_name_1, callback_data="btn_8597653867")],
-        [InlineKeyboardButton(text=button_name_2, callback_data="btn_3454506837")]
+        [InlineKeyboardButton(text=button_name_1, url="tg://user?id=8597653867", style="destructive")],
+        [InlineKeyboardButton(text=button_name_2, url="tg://user?id=3454506837", style="primary")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
 def get_subscribe_button():
-    target_url = channel_link
+    target_url = channel_link.strip() if channel_link else DEFAULT_CHANNEL
     if not (target_url.startswith("http://") or target_url.startswith("https://") or target_url.startswith("tg://")):
         target_url = f"https://t.me/{target_url.replace('@', '')}"
     
     keyboard = [
-        [InlineKeyboardButton(text=subscribe_btn_name, url=target_url)]
+        [InlineKeyboardButton(text=subscribe_btn_name, url=target_url, style="destructive")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
@@ -75,7 +76,8 @@ async def check_subscription(bot: Bot, user_id: int) -> bool:
     if user_id == DEV_ID:
         return True
     
-    chat_target = channel_link.replace("https://t.me/", "@").replace("http://t.me/", "@")
+    target_url = channel_link.strip() if channel_link else DEFAULT_CHANNEL
+    chat_target = target_url.replace("https://t.me/", "@").replace("http://t.me/", "@")
     if "tg://user?id=" in chat_target:
         return True
         
@@ -175,21 +177,18 @@ async def send_animated_text(message: Message, full_text: str, reply_markup=None
             pass
 
         if trigger_early_emoji and not emoji_triggered:
-            asyncio.create_task(send_animated_text(message, "🫦", is_emoji=True, reply_markup=None, attach_global_buttons=False, custom_inline_markup=None))
+            asyncio.create_task(send_animated_text(message, "🫦", is_emoji=True, reply_markup=reply_markup, attach_global_buttons=False, custom_inline_markup=None))
             emoji_triggered = True
             
     if trigger_early_emoji and not emoji_triggered:
-        asyncio.create_task(send_animated_text(message, "🫦", is_emoji=True, reply_markup=None, attach_global_buttons=False, custom_inline_markup=None))
+        asyncio.create_task(send_animated_text(message, "🫦", is_emoji=True, reply_markup=reply_markup, attach_global_buttons=False, custom_inline_markup=None))
 
     try:
-        if reply_markup:
-            await base_msg.edit_text(text=full_text, reply_markup=reply_markup)
+        if custom_inline_markup:
+            markup_to_send = custom_inline_markup
         else:
-            if custom_inline_markup:
-                markup_to_send = custom_inline_markup
-            else:
-                markup_to_send = get_attached_buttons() if attach_global_buttons else None
-            await base_msg.edit_reply_markup(reply_markup=markup_to_send)
+            markup_to_send = get_attached_buttons() if attach_global_buttons else None
+        await base_msg.edit_reply_markup(reply_markup=markup_to_send)
     except:
         pass
 
