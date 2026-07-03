@@ -16,17 +16,21 @@ try:
 except ImportError:
     pass
 
+
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 DEV_ID = 8597653867
+
 
 channel_link = None
 button_name = "اشترك"
 REACTIONS = ["😘", "😡", "🥰", "🍓", "😭", "🤗", "🤣"]
 
+
 style_channel = "green"
 style_dev_clean = "destructive"
 style_dev_error = "destructive"
+
 
 user_states = {}
 last_reactions = {}
@@ -35,12 +39,14 @@ song_cache = {}
 
 router = Router()
 
+
 async def add_banana_reaction(message: Message):
     await asyncio.sleep(1.5)
     try:
         await message.react(reaction=[{"type": "emoji", "emoji": "🍌"}])
     except:
         pass
+
 
 async def add_unique_reaction(message: Message):
     await asyncio.sleep(3)
@@ -63,6 +69,7 @@ async def add_unique_reaction(message: Message):
     except:
         pass
 
+
 async def handle_emoji_animation(message: Message):
     await asyncio.sleep(3)
     try:
@@ -70,12 +77,10 @@ async def handle_emoji_animation(message: Message):
     except:
         pass
 
+
 async def send_animated_text(message: Message, full_text: str, reply_markup=None, is_emoji=False, trigger_early_emoji=False, force_dev_btn=False):
     if is_emoji and full_text == "🫦":
-        msg = await message.reply(
-            text="🫦", 
-            reply_markup=reply_markup
-        )
+        msg = await message.reply(text="🫦", reply_markup=reply_markup)
         asyncio.create_task(add_unique_reaction(msg))
         asyncio.create_task(handle_emoji_animation(msg))
         return msg
@@ -113,10 +118,7 @@ async def send_animated_text(message: Message, full_text: str, reply_markup=None
             current_lines.append("")
             
     current_text = "\n".join(current_lines)
-    base_msg = await message.reply(
-        text=current_text,
-        reply_markup=None
-    )
+    base_msg = await message.reply(text=current_text, reply_markup=None)
     asyncio.create_task(add_unique_reaction(base_msg))
 
     emoji_triggered = False
@@ -156,6 +158,7 @@ async def send_animated_text(message: Message, full_text: str, reply_markup=None
 
     return base_msg
 
+
 async def send_dynamic_reply(message: Message):
     user_id = message.from_user.id
     current_user_state = user_states.get(user_id, {})
@@ -169,6 +172,7 @@ async def send_dynamic_reply(message: Message):
         await send_animated_text(message, "مو ناوي تستعملني مثل البوتات ؟!\nترى اضوج منك", trigger_early_emoji=True, force_dev_btn=True)
         current_user_state['chat_state'] = 0
         user_states[user_id] = current_user_state
+
 
 async def search_youtube_api(query):
     url = "https://www.googleapis.com/youtube/v3/search"
@@ -191,11 +195,13 @@ async def search_youtube_api(query):
         return None, None
     return None, None
 
+
 def download_video_sync(ydl_opts, video_url):
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(video_url, download=True)
         video_info = info['entries'][0] if 'entries' in info else info
         return ydl.prepare_filename(video_info)
+
 
 async def process_youtube_search(message: Message, text: str):
     global channel_link, button_name, style_channel, style_dev_clean
@@ -318,6 +324,7 @@ async def process_youtube_search(message: Message, text: str):
         elif 'audio_filename' in locals() and os.path.exists(audio_filename):
             os.remove(audio_filename)
 
+
 @router.message(F.text)
 async def handle_message(message: Message):
     global channel_link, button_name, style_channel, style_dev_clean, style_dev_error
@@ -397,7 +404,7 @@ async def handle_message(message: Message):
             await send_animated_text(message, "🫦", is_emoji=True, reply_markup=reply_markup)
             return
 
-    elif is_private fraud user_id == DEV_ID and current_action == 'apply_color':
+    elif is_private and user_id == DEV_ID and current_action == 'apply_color':
         if text in ["🟢", "🔴", "🔵"]:
             target_btn = current_user_state.get('target_btn')
             color_map = {"🟢": "green", "🔴": "destructive", "🔵": "primary"}
@@ -434,7 +441,7 @@ async def handle_message(message: Message):
             await send_animated_text(message, f"تم مسح {deleted_count} من الصوتيات\nلان امرتني مولاي", reply_markup=reply_markup, trigger_early_emoji=True)
         return
 
-    if is_private and user_id == DEV_ID and text == "ادت":
+    if is_private and user_id == DEV_ID and text == "دت":
         keyboard = [
             [KeyboardButton(text="تعيين الرابط"), KeyboardButton(text="تغيير اسم الزر")],
             [KeyboardButton(text="تغيير لون الزر")]
@@ -470,7 +477,7 @@ async def handle_message(message: Message):
     if is_private and user_id == DEV_ID:
         if text == "تعيين الرابط":
             user_states[user_id] = {'action': 'wait_link'}
-            await send_animated_text(message, "ارسل يوزر / رابط القناء او الكروب\nيلا مولاي", trigger_early_emoji=True)
+            await send_animated_text(message, "ارسل يوزر / رابط القناة او الكروب\nيلا مولاي", trigger_early_emoji=True)
             return
         elif text == "تغيير اسم الزر":
             user_states[user_id] = {'action': 'wait_name'}
@@ -490,6 +497,7 @@ async def handle_message(message: Message):
 
     if is_private:
         await send_dynamic_reply(message)
+
 
 async def main():
     if not TOKEN:
