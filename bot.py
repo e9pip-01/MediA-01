@@ -22,7 +22,7 @@ DEV_ID = 8597653867
 
 channel_link = None
 button_name = "اشترك"
-REACTIONS = ["😘", "😡", "🥰", "🍌", "🍓", "😭", "🤗", "🤣"]
+REACTIONS = ["😘", "😡", "🥰", "🍓", "😭", "🤗", "🤣"]
 
 style_channel = "primary"
 style_dev_clean = "destructive"
@@ -34,6 +34,13 @@ bot_audio_messages = {}
 song_cache = {}
 
 router = Router()
+
+async def add_banana_reaction(message: Message):
+    await asyncio.sleep(1.5)
+    try:
+        await message.react(reaction=[{"type": "emoji", "emoji": "🍌"}])
+    except:
+        pass
 
 async def add_unique_reaction(message: Message):
     await asyncio.sleep(3)
@@ -128,12 +135,7 @@ async def send_animated_text(message: Message, full_text: str, reply_markup=None
         except:
             pass
 
-    if delayed_reply_markup:
-        try:
-            await base_msg.edit_reply_markup(reply_markup=delayed_reply_markup)
-        except:
-            pass
-    elif final_reply_markup:
+    if final_reply_markup:
         try:
             await base_msg.edit_reply_markup(reply_markup=final_reply_markup)
         except:
@@ -327,19 +329,23 @@ async def handle_message(message: Message):
         except:
             pass
 
-    if is_private:
-        asyncio.create_task(add_unique_reaction(message))
-    elif is_group and is_admin_or_dev:
-        asyncio.create_task(add_unique_reaction(message))
+    is_yut_command = text.startswith("يوت ")
+
+    if is_yut_command:
+        if is_private or (is_group and is_admin_or_dev):
+            asyncio.create_task(add_banana_reaction(message))
+    else:
+        if is_private:
+            asyncio.create_task(add_unique_reaction(message))
+        elif is_group and is_admin_or_dev:
+            asyncio.create_task(add_unique_reaction(message))
 
     current_user_state = user_states.get(user_id, {})
     current_action = current_user_state.get('action')
     
     if is_private and user_id == DEV_ID and text == "الغاء":
         user_states[user_id] = {'chat_state': 0}
-        msg = await message.reply(text="تم إلغاء العملية", reply_markup=ReplyKeyboardRemove())
-        asyncio.create_task(add_unique_reaction(msg))
-        await send_animated_text(message, "صار دادي ماراح اغير او اسوي شي\nءمهمواح")
+        await send_animated_text(message, "صار دادي ماراح اغير او اسوي شي\nءمهمواح", reply_markup=ReplyKeyboardRemove())
         await send_animated_text(message, "🫦", is_emoji=True)
         return
 
@@ -383,7 +389,8 @@ async def handle_message(message: Message):
                 [KeyboardButton(text="الغاء")]
             ]
             reply_markup = ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True, one_time_keyboard=True)
-            await send_animated_text(message, "اختر اللون المطلوب مولاي:", delayed_reply_markup=reply_markup)
+            await send_animated_text(message, "اختر اللون المطلوب مولاي:")
+            await send_animated_text(message, "🫦", is_emoji=True, reply_markup=reply_markup)
             return
 
     elif is_private and user_id == DEV_ID and current_action == 'apply_color':
@@ -400,9 +407,7 @@ async def handle_message(message: Message):
                 style_dev_error = chosen_color
                 
             user_states[user_id] = {'chat_state': 0}
-            msg = await message.reply(text="تم حفظ اللون", reply_markup=ReplyKeyboardRemove())
-            asyncio.create_task(add_unique_reaction(msg))
-            await send_animated_text(message, "تم تعيين لون الزر المطلوب مثل ماتريد\nمولاي وغصبا عليه اطيعك")
+            await send_animated_text(message, "تم تعيين لون الزر المطلوب مثل ماتريد\nمولاي وغصبا عليه اطيعك", reply_markup=ReplyKeyboardRemove())
             await send_animated_text(message, "🫦", is_emoji=True)
             return
 
@@ -436,10 +441,9 @@ async def handle_message(message: Message):
         
         await send_animated_text(
             message=message,
-            full_text="تريد تغير اسم الزر دوس تغيير اسم الزر\nتريد تعين رابط الزر دوس تعيين الرابط",
-            delayed_reply_markup=reply_markup
+            full_text="تريد تغير اسم الزر دوس تغيير اسم الزر\nتريد تعين رابط الزر دوس تعيين الرابط"
         )
-        await send_animated_text(message, "🫦", is_emoji=True)
+        await send_animated_text(message, "🫦", is_emoji=True, reply_markup=reply_markup)
         return
 
     if is_private and user_id == DEV_ID and text == "تغيير لون الزر":
@@ -449,28 +453,24 @@ async def handle_message(message: Message):
             [KeyboardButton(text="الغاء")]
         ]
         reply_markup = ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True, one_time_keyboard=True)
-        await send_animated_text(message, "اضغط على اسم الزر التريد تبدل لونه\nعلمود اغيره مثل ماتريد", delayed_reply_markup=reply_markup)
-        await send_animated_text(message, "🫦", is_emoji=True)
+        await send_animated_text(message, "اضغط على اسم الزر التريد تبدل لونه\nعلمود اغيره مثل ماتريد")
+        await send_animated_text(message, "🫦", is_emoji=True, reply_markup=reply_markup)
         return
 
     if is_private and user_id == DEV_ID:
         if text == "تعيين الرابط":
             user_states[user_id] = {'action': 'wait_link'}
-            msg = await message.reply(text="انتظار الرابط...", reply_markup=ReplyKeyboardRemove())
-            asyncio.create_task(add_unique_reaction(msg))
             await send_animated_text(message, "ارسل يوزر / رابط القناة او الكروب\nيلا مولاي")
             await send_animated_text(message, "🫦", is_emoji=True)
             return
         elif text == "تغيير اسم الزر":
             user_states[user_id] = {'action': 'wait_name'}
-            msg = await message.reply(text="انتظار الاسم...", reply_markup=ReplyKeyboardRemove())
-            asyncio.create_task(add_unique_reaction(msg))
             await send_animated_text(message, "شتريد اسم الزر المرفق وي الرسايل\nيصير تاج راسي")
             await send_animated_text(message, "🫦", is_emoji=True)
             return
 
     if text.startswith("يوت"):
-        if is_group and not text.startswith("يوت "):
+        if is_group and not is_yut_command:
             return
         await process_youtube_search(message, text)
         return
