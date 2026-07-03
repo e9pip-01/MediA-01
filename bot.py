@@ -2,6 +2,7 @@ import os
 import re
 import asyncio
 import random
+import time
 import aiohttp
 import aiofiles
 from aiogram import Bot, Dispatcher, Router, F
@@ -178,7 +179,10 @@ async def search_youtube_api(query):
 
 
 def make_progress_hook(loop, bot, chat_id, message_id):
-    last_percent = [""]
+    state = {
+        'last_update_time': 0,
+        'last_percent': 0
+    }
     
     def hook(d):
         if d['status'] == 'downloading':
@@ -186,15 +190,20 @@ def make_progress_hook(loop, bot, chat_id, message_id):
             downloaded = d.get('downloaded_bytes', 0)
             if total:
                 percent_num = int(downloaded / total * 100)
-                percent_str = f" {percent_num}%"
+                now = time.time()
                 
-                if percent_str != last_percent[0]:
-                    last_percent[0] = percent_str
-                    text = f"يتم العثور على الاغنيه مولاي\nماتنتظر فدوا{percent_str}"
-                    asyncio.run_coroutine_threadsafe(
-                        bot.edit_text(chat_id=chat_id, message_id=message_id, text=text),
-                        loop
-                    )
+                step = 10 if state['last_percent'] >= 80 else 15
+                
+                if percent_num >= state['last_percent'] + step or percent_num == 100 or (now - state['last_update_time'] >= 2.0):
+                    if percent_num != state['last_percent']:
+                        state['last_percent'] = percent_num
+                        state['last_update_time'] = now
+                        
+                        text = f"يتم العثور على الاغنيه مولاي\nماتنتظر فدوا {percent_num}%"
+                        asyncio.run_coroutine_threadsafe(
+                            bot.edit_text(chat_id=chat_id, message_id=message_id, text=text),
+                            loop
+                        )
     return hook
 
 
@@ -252,16 +261,20 @@ async def process_youtube_search(message: Message, text: str):
     loop = asyncio.get_running_loop()
     progress_hook = make_progress_hook(loop, message.bot, chat_id, status_message.message_id)
 
+    user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36'
+
     ydl_opts = {
         'format': 'bestaudio/best',
         'outtmpl': '%(title)s.%(ext)s',
         'quiet': True,
         'socket_timeout': 15,
+        'nocheckcertificate': True,
+        'user_agent': user_agent,
         'http_chunk_size': 1048576,
         'external_downloader': 'curl_cffi',
         'external_downloader_args': ['--impersonate', 'chrome'],
         'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36',
+            'User-Agent': user_agent,
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.9',
             'Sec-Ch-Ua': '"Google Chrome";v="144", "Not=A?Brand";v="8", "Chromium";v="144"',
