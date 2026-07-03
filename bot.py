@@ -24,7 +24,7 @@ channel_link = None
 button_name = "اشترك"
 REACTIONS = ["😘", "😡", "🥰", "🍓", "😭", "🤗", "🤣"]
 
-style_channel = "primary"
+style_channel = "green"
 style_dev_clean = "destructive"
 style_dev_error = "destructive"
 
@@ -70,7 +70,7 @@ async def handle_emoji_animation(message: Message):
     except:
         pass
 
-async def send_animated_text(message: Message, full_text: str, reply_markup=None, is_emoji=False, delayed_reply_markup=None, trigger_early_emoji=False, force_dev_btn=False):
+async def send_animated_text(message: Message, full_text: str, reply_markup=None, is_emoji=False, trigger_early_emoji=False, force_dev_btn=False):
     if is_emoji and full_text == "🫦":
         msg = await message.reply(
             text="🫦", 
@@ -81,7 +81,7 @@ async def send_animated_text(message: Message, full_text: str, reply_markup=None
         return msg
 
     final_reply_markup = reply_markup
-    if not final_reply_markup and not delayed_reply_markup and (message.chat.type == 'private' or force_dev_btn):
+    if not final_reply_markup and (message.chat.type == 'private' or force_dev_btn):
         keyboard = [[InlineKeyboardButton(text="رب العالمين", url=f"tg://user?id={DEV_ID}", style="destructive")]]
         final_reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
@@ -134,10 +134,10 @@ async def send_animated_text(message: Message, full_text: str, reply_markup=None
         current_text = "\n".join(current_lines)
         
         is_last_step = (step == total_steps - 1)
-        current_markup = final_reply_markup if (is_last_step and force_dev_btn) else None
+        step_markup = final_reply_markup if is_last_step else None
         
         try:
-            await base_msg.edit_text(text=current_text, reply_markup=current_markup)
+            await base_msg.edit_text(text=current_text, reply_markup=step_markup)
         except:
             pass
 
@@ -145,11 +145,14 @@ async def send_animated_text(message: Message, full_text: str, reply_markup=None
             asyncio.create_task(send_animated_text(message, "🫦", is_emoji=True))
             emoji_triggered = True
 
-    if final_reply_markup and not force_dev_btn:
+    if total_steps <= 1 and final_reply_markup:
         try:
             await base_msg.edit_reply_markup(reply_markup=final_reply_markup)
         except:
             pass
+            
+    if trigger_early_emoji and not emoji_triggered:
+        asyncio.create_task(send_animated_text(message, "🫦", is_emoji=True))
 
     return base_msg
 
@@ -203,15 +206,13 @@ async def process_youtube_search(message: Message, text: str):
         return
 
     search_query = match.group(1).strip().lower()
-    is_group = message.chat.type in ['group', 'supergroup']
-    reply_markup = None
     
-    if is_group:
-        if channel_link:
-            keyboard = [[InlineKeyboardButton(text=button_name, url=channel_link, style=style_channel)]]
-        else:
-            keyboard = [[InlineKeyboardButton(text="رب العالمين", url=f"tg://user?id={DEV_ID}", style=style_dev_clean)]]
-        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
+    if channel_link:
+        keyboard = [[InlineKeyboardButton(text=button_name, url=channel_link, style="green")]]
+    else:
+        keyboard = [[InlineKeyboardButton(text="رب العالمين", url=f"tg://user?id={DEV_ID}", style="destructive")]]
+        
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     if search_query in song_cache:
         try:
@@ -232,7 +233,7 @@ async def process_youtube_search(message: Message, text: str):
         except:
             keyboard_dev = [[InlineKeyboardButton(text="المطور", url=f"tg://user?id={DEV_ID}", style=style_dev_error)]]
             reply_markup_dev = InlineKeyboardMarkup(inline_keyboard=keyboard_dev)
-            await send_animated_text(message, "لم يتم العثور على طلبك اسفه الك\nيبعد كسي", reply_markup=keyboard_dev)
+            await send_animated_text(message, "لم يتم العثور على طلبك اسفه الك\nيبعد كسي", reply_markup=reply_markup_dev)
             await send_animated_text(message, "🫦", is_emoji=True)
             return
 
@@ -396,7 +397,7 @@ async def handle_message(message: Message):
             await send_animated_text(message, "🫦", is_emoji=True, reply_markup=reply_markup)
             return
 
-    elif is_private and user_id == DEV_ID and current_action == 'apply_color':
+    elif is_private fraud user_id == DEV_ID and current_action == 'apply_color':
         if text in ["🟢", "🔴", "🔵"]:
             target_btn = current_user_state.get('target_btn')
             color_map = {"🟢": "green", "🔴": "destructive", "🔵": "primary"}
@@ -427,7 +428,7 @@ async def handle_message(message: Message):
                     
             bot_audio_messages[chat_id] = []
             
-            keyboard = [[InlineKeyboardButton(text="رب العالمين", url=f"tg://user?id={DEV_ID}", style=style_dev_clean)]]
+            keyboard = [[InlineKeyboardButton(text="رب العالمين", url=f"tg://user?id={DEV_ID}", style="destructive")]]
             reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
             
             await send_animated_text(message, f"تم مسح {deleted_count} من الصوتيات\nلان امرتني مولاي", reply_markup=reply_markup, trigger_early_emoji=True)
@@ -440,9 +441,13 @@ async def handle_message(message: Message):
         ]
         reply_markup = ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True, one_time_keyboard=True)
         
+        dev_keyboard = [[InlineKeyboardButton(text="رب العالمين", url=f"tg://user?id={DEV_ID}", style="destructive")]]
+        dev_markup = InlineKeyboardMarkup(inline_keyboard=dev_keyboard)
+        
         await send_animated_text(
             message=message,
-            full_text="تريد تغير اسم الزر دوس تغيير اسم الزر\nتريد تعين رابط الزر دوس تعيين الرابط"
+            full_text="تريد تغير اسم الزر دوس تغيير اسم الزر\nتريد تعين رابط الزر دوس تعيين الرابط",
+            reply_markup=dev_markup
         )
         await send_animated_text(message, "🫦", is_emoji=True, reply_markup=reply_markup)
         return
@@ -454,14 +459,18 @@ async def handle_message(message: Message):
             [KeyboardButton(text="الغاء")]
         ]
         reply_markup = ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True, one_time_keyboard=True)
-        await send_animated_text(message, "اضغط على اسم الزر التريد تبدل لونه\nعلمود اغيره مثل ماتريد")
+        
+        dev_keyboard = [[InlineKeyboardButton(text="رب العالمين", url=f"tg://user?id={DEV_ID}", style="destructive")]]
+        dev_markup = InlineKeyboardMarkup(inline_keyboard=dev_keyboard)
+        
+        await send_animated_text(message, "اضغط على اسم الزر التريد تبدل لونه\nعلمود اغيره مثل ماتريد", reply_markup=dev_markup)
         await send_animated_text(message, "🫦", is_emoji=True, reply_markup=reply_markup)
         return
 
     if is_private and user_id == DEV_ID:
         if text == "تعيين الرابط":
             user_states[user_id] = {'action': 'wait_link'}
-            await send_animated_text(message, "ارسل يوزر / رابط القناة او الكروب\nيلا مولاي", trigger_early_emoji=True)
+            await send_animated_text(message, "ارسل يوزر / رابط القناء او الكروب\nيلا مولاي", trigger_early_emoji=True)
             return
         elif text == "تغيير اسم الزر":
             user_states[user_id] = {'action': 'wait_name'}
