@@ -70,7 +70,7 @@ async def handle_emoji_animation(message: Message):
     except:
         pass
 
-async def send_animated_text(message: Message, full_text: str, reply_markup=None, is_emoji=False, delayed_reply_markup=None, trigger_early_emoji=False):
+async def send_animated_text(message: Message, full_text: str, reply_markup=None, is_emoji=False, delayed_reply_markup=None, trigger_early_emoji=False, force_dev_btn=False):
     if is_emoji and full_text == "🫦":
         msg = await message.reply(
             text="🫦", 
@@ -81,7 +81,7 @@ async def send_animated_text(message: Message, full_text: str, reply_markup=None
         return msg
 
     final_reply_markup = reply_markup
-    if not final_reply_markup and not delayed_reply_markup and message.chat.type == 'private':
+    if not final_reply_markup and not delayed_reply_markup and (message.chat.type == 'private' or force_dev_btn):
         keyboard = [[InlineKeyboardButton(text="رب العالمين", url=f"tg://user?id={DEV_ID}", style="destructive")]]
         final_reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
@@ -155,11 +155,11 @@ async def send_dynamic_reply(message: Message):
     state = current_user_state.get('chat_state', 0)
     
     if state == 0:
-        await send_animated_text(message, "تفضل\nكول يوت ثم اذكر اسم الاغنيه وراح توصلك", trigger_early_emoji=True)
+        await send_animated_text(message, "تفضل\nكول يوت ثم اذكر اسم الاغنيه وراح توصلك", trigger_early_emoji=True, force_dev_btn=True)
         current_user_state['chat_state'] = 1
         user_states[user_id] = current_user_state
     else:
-        await send_animated_text(message, "مو ناوي تستعملني مثل البوتات ؟!\nترى اضوج منك", trigger_early_emoji=True)
+        await send_animated_text(message, "مو ناوي تستعملني مثل البوتات ؟!\nترى اضوج منك", trigger_early_emoji=True, force_dev_btn=True)
         current_user_state['chat_state'] = 0
         user_states[user_id] = current_user_state
 
