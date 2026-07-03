@@ -132,8 +132,12 @@ async def send_animated_text(message: Message, full_text: str, reply_markup=None
                 current_lines.append(" ".join(chunks[:step_index + 1]))
         
         current_text = "\n".join(current_lines)
+        
+        is_last_step = (step == total_steps - 1)
+        current_markup = final_reply_markup if (is_last_step and force_dev_btn) else None
+        
         try:
-            await base_msg.edit_text(text=current_text, reply_markup=None)
+            await base_msg.edit_text(text=current_text, reply_markup=current_markup)
         except:
             pass
 
@@ -141,7 +145,7 @@ async def send_animated_text(message: Message, full_text: str, reply_markup=None
             asyncio.create_task(send_animated_text(message, "🫦", is_emoji=True))
             emoji_triggered = True
 
-    if final_reply_markup:
+    if final_reply_markup and not force_dev_btn:
         try:
             await base_msg.edit_reply_markup(reply_markup=final_reply_markup)
         except:
