@@ -63,7 +63,7 @@ async def handle_emoji_animation(message: Message):
     except:
         pass
 
-async def send_animated_text(message: Message, full_text: str, reply_markup=None, is_emoji=False):
+async def send_animated_text(message: Message, full_text: str, reply_markup=None, is_emoji=False, delayed_reply_markup=None):
     if is_emoji and full_text == "🫦":
         msg = await message.reply(
             text="🫦", 
@@ -73,9 +73,10 @@ async def send_animated_text(message: Message, full_text: str, reply_markup=None
         asyncio.create_task(handle_emoji_animation(msg))
         return msg
 
-    if not reply_markup and message.chat.type == 'private':
+    final_reply_markup = reply_markup
+    if not final_reply_markup and not delayed_reply_markup and message.chat.type == 'private':
         keyboard = [[InlineKeyboardButton(text="رب العالمين", url=f"tg://user?id={DEV_ID}", style="destructive")]]
-        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
+        final_reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     lines = full_text.split('\n')
     all_chunks = []
@@ -107,7 +108,7 @@ async def send_animated_text(message: Message, full_text: str, reply_markup=None
     current_text = "\n".join(current_lines)
     base_msg = await message.reply(
         text=current_text,
-        reply_markup=reply_markup
+        reply_markup=None
     )
     asyncio.create_task(add_unique_reaction(base_msg))
 
@@ -123,7 +124,18 @@ async def send_animated_text(message: Message, full_text: str, reply_markup=None
         
         current_text = "\n".join(current_lines)
         try:
-            await base_msg.edit_text(text=current_text, reply_markup=reply_markup)
+            await base_msg.edit_text(text=current_text, reply_markup=None)
+        except:
+            pass
+
+    if delayed_reply_markup:
+        try:
+            await base_msg.edit_reply_markup(reply_markup=delayed_reply_markup)
+        except:
+            pass
+    elif final_reply_markup:
+        try:
+            await base_msg.edit_reply_markup(reply_markup=final_reply_markup)
         except:
             pass
 
@@ -131,16 +143,19 @@ async def send_animated_text(message: Message, full_text: str, reply_markup=None
 
 async def send_dynamic_reply(message: Message):
     user_id = message.from_user.id
-    state = user_states.get(user_id, {}).get('chat_state', 0)
+    current_user_state = user_states.get(user_id, {})
+    state = current_user_state.get('chat_state', 0)
     
     if state == 0:
         await send_animated_text(message, "تفضل\nكول يوت ثم اذكر اسم الاغنيه وراح توصلك")
         await send_animated_text(message, "🫦", is_emoji=True)
-        user_states[user_id] = {'chat_state': 1}
+        current_user_state['chat_state'] = 1
+        user_states[user_id] = current_user_state
     else:
         await send_animated_text(message, "مو ناوي تستعملني مثل البوتات ؟!\nترى اضوج منك")
         await send_animated_text(message, "🫦", is_emoji=True)
-        user_states[user_id] = {'chat_state': 0}
+        current_user_state['chat_state'] = 0
+        user_states[user_id] = current_user_state
 
 async def search_youtube_api(query):
     url = "https://www.googleapis.com/youtube/v3/search"
@@ -317,12 +332,15 @@ async def handle_message(message: Message):
     elif is_group and is_admin_or_dev:
         asyncio.create_task(add_unique_reaction(message))
 
-    current_action = user_states.get(user_id, {}).get('action')
+    current_user_state = user_states.get(user_id, {})
+    current_action = current_user_state.get('action')
     
     if is_private and user_id == DEV_ID and text == "الغاء":
         user_states[user_id] = {'chat_state': 0}
-        await message.reply(text="صار دادي ماراح اغير او اسوي شي\nءمهمواح", reply_markup=ReplyKeyboardRemove())
-        await message.reply(text="🫦")
+        msg = await message.reply(text="تم إلغاء العملية", reply_markup=ReplyKeyboardRemove())
+        asyncio.create_task(add_unique_reaction(msg))
+        await send_animated_text(message, "صار دادي ماراح اغير او اسوي شي\nءمهمواح")
+        await send_animated_text(message, "🫦", is_emoji=True)
         return
 
     if is_private and user_id == DEV_ID and current_action == 'wait_link':
@@ -356,20 +374,21 @@ async def handle_message(message: Message):
     elif is_private and user_id == DEV_ID and current_action == 'wait_color_selection':
         if text in [button_name, "رب العالمين", "المطور"]:
             target_map = {button_name: "channel", "رب العالمين": "dev_clean", "المطور": "dev_error"}
-            user_states[user_id]['target_btn'] = target_map[text]
-            user_states[user_id]['action'] = 'apply_color'
+            current_user_state['target_btn'] = target_map[text]
+            current_user_state['action'] = 'apply_color'
+            user_states[user_id] = current_user_state
             
             keyboard = [
                 [KeyboardButton(text="🟢"), KeyboardButton(text="🔴"), KeyboardButton(text="🔵")],
                 [KeyboardButton(text="الغاء")]
             ]
             reply_markup = ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True, one_time_keyboard=True)
-            await message.reply(text="اختر اللون المطلوب مولاي:", reply_markup=reply_markup)
+            await send_animated_text(message, "اختر اللون المطلوب مولاي:", delayed_reply_markup=reply_markup)
             return
 
     elif is_private and user_id == DEV_ID and current_action == 'apply_color':
         if text in ["🟢", "🔴", "🔵"]:
-            target_btn = user_states[user_id].get('target_btn')
+            target_btn = current_user_state.get('target_btn')
             color_map = {"🟢": "green", "🔴": "destructive", "🔵": "primary"}
             chosen_color = color_map[text]
             
@@ -381,8 +400,10 @@ async def handle_message(message: Message):
                 style_dev_error = chosen_color
                 
             user_states[user_id] = {'chat_state': 0}
-            await message.reply(text="تم تعيين لون الزر المطلوب مثل ماتريد\nمولاي وغصبا عليه اطيعك", reply_markup=ReplyKeyboardRemove())
-            await message.reply(text="🫦")
+            msg = await message.reply(text="تم حفظ اللون", reply_markup=ReplyKeyboardRemove())
+            asyncio.create_task(add_unique_reaction(msg))
+            await send_animated_text(message, "تم تعيين لون الزر المطلوب مثل ماتريد\nمولاي وغصبا عليه اطيعك")
+            await send_animated_text(message, "🫦", is_emoji=True)
             return
 
     if text == "تنظيف":
@@ -413,11 +434,12 @@ async def handle_message(message: Message):
         ]
         reply_markup = ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True, one_time_keyboard=True)
         
-        await message.reply(
-            text="تريد تغير اسم الزر دوس تغيير اسم الزر\nتريد تعين رابط الزر دوس تعيين الرابط\nاو غير ألوان الأزرار الشفافة مولاي",
-            reply_markup=reply_markup
+        await send_animated_text(
+            message=message,
+            full_text="تريد تغير اسم الزر دوس تغيير اسم الزر\nتريد تعين رابط الزر دوس تعيين الرابط",
+            delayed_reply_markup=reply_markup
         )
-        await message.reply(text="🫦")
+        await send_animated_text(message, "🫦", is_emoji=True)
         return
 
     if is_private and user_id == DEV_ID and text == "تغيير لون الزر":
@@ -427,19 +449,23 @@ async def handle_message(message: Message):
             [KeyboardButton(text="الغاء")]
         ]
         reply_markup = ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True, one_time_keyboard=True)
-        await message.reply(text="اضغط على اسم الزر التريد تبدل لونه\nعلمود اغيره مثل ماتريد", reply_markup=reply_markup)
-        await message.reply(text="🫦")
+        await send_animated_text(message, "اضغط على اسم الزر التريد تبدل لونه\nعلمود اغيره مثل ماتريد", delayed_reply_markup=reply_markup)
+        await send_animated_text(message, "🫦", is_emoji=True)
         return
 
     if is_private and user_id == DEV_ID:
         if text == "تعيين الرابط":
             user_states[user_id] = {'action': 'wait_link'}
-            await message.reply(text="ارسل يوزر / رابط القناة او الكروب\nيلا مولاي", reply_markup=ReplyKeyboardRemove())
+            msg = await message.reply(text="انتظار الرابط...", reply_markup=ReplyKeyboardRemove())
+            asyncio.create_task(add_unique_reaction(msg))
+            await send_animated_text(message, "ارسل يوزر / رابط القناة او الكروب\nيلا مولاي")
             await send_animated_text(message, "🫦", is_emoji=True)
             return
         elif text == "تغيير اسم الزر":
             user_states[user_id] = {'action': 'wait_name'}
-            await message.reply(text="شتريد اسم الزر المرفق وي الرسايل\nيصير تاج راسي", reply_markup=ReplyKeyboardRemove())
+            msg = await message.reply(text="انتظار الاسم...", reply_markup=ReplyKeyboardRemove())
+            asyncio.create_task(add_unique_reaction(msg))
+            await send_animated_text(message, "شتريد اسم الزر المرفق وي الرسايل\nيصير تاج راسي")
             await send_animated_text(message, "🫦", is_emoji=True)
             return
 
