@@ -211,7 +211,8 @@ def download_video_sync(ydl_opts, video_url):
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(video_url, download=True)
         video_info = info['entries'][0] if 'entries' in info else info
-        return ydl.prepare_filename(video_info)
+        filename = ydl.prepare_filename(video_info)
+        return filename
 
 
 async def process_youtube_search(message: Message, text: str):
@@ -228,8 +229,8 @@ async def process_youtube_search(message: Message, text: str):
             cached_file_id = song_cache[search_query]["file_id"]
             cached_title = song_cache[search_query]["title"]
             
-            audio_msg = await message.reply_voice(
-                voice=cached_file_id,
+            audio_msg = await message.reply_audio(
+                audio=cached_file_id,
                 caption=cached_title
             )
             asyncio.create_task(add_unique_reaction(audio_msg))
@@ -285,32 +286,24 @@ async def process_youtube_search(message: Message, text: str):
     }
     
     audio_filename = None
-    final_filename = None
     
     try:
         audio_filename = await loop.run_in_executor(None, download_video_sync, ydl_opts, video_url)
-        
-        base, ext = os.path.splitext(audio_filename)
-        final_filename = f"{base}.ogg"
-        
-        if os.path.exists(final_filename):
-            os.remove(final_filename)
-        os.rename(audio_filename, final_filename)
 
-        async with aiofiles.open(final_filename, 'rb') as f:
-            voice_data = await f.read()
+        async with aiofiles.open(audio_filename, 'rb') as f:
+            audio_data = await f.read()
 
         from aiogram.types import BufferedInputFile
-        input_file = BufferedInputFile(voice_data, filename=final_filename)
+        input_file = BufferedInputFile(audio_data, filename=os.path.basename(audio_filename))
 
-        audio_msg = await message.reply_voice(
-            voice=input_file, 
+        audio_msg = await message.reply_audio(
+            audio=input_file, 
             caption=video_title
         )
         asyncio.create_task(add_unique_reaction(audio_msg))
         
         song_cache[search_query] = {
-            "file_id": audio_msg.voice.file_id,
+            "file_id": audio_msg.audio.file_id,
             "title": video_title
         }
         
@@ -332,11 +325,6 @@ async def process_youtube_search(message: Message, text: str):
         await send_animated_text(message, "🫦", is_emoji=True)
         
     finally:
-        if final_filename and os.path.exists(final_filename):
-            try:
-                os.remove(final_filename)
-            except:
-                pass
         if audio_filename and os.path.exists(audio_filename):
             try:
                 os.remove(audio_filename)
@@ -364,7 +352,7 @@ async def handle_message(message: Message):
         except:
             pass
 
-    is_yut_command = text.startswith("يوت ")
+    is_yut_command = bool(re.match(r'^يوت\s+(.+)$', text))
 
     if is_yut_command:
         if is_private or (is_group and is_admin_or_dev):
@@ -447,9 +435,7 @@ async def handle_message(message: Message):
             await send_animated_text(message, "شتريد اسم الزر المرفق وي الرسايل\nيصير تاج راسي", trigger_early_emoji=True)
             return
 
-    if text.startswith("يوت"):
-        if is_group and not is_yut_command:
-            return
+    if is_yut_command:
         await process_youtube_search(message, text)
         return
 
