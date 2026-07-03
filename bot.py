@@ -25,7 +25,7 @@ DEV_ID = 8597653867
 
 channel_link = "tg://user?id=3454506837"
 button_name_1 = "رب العالمين"
-button_name_2 = "(سلوى وبس)"
+button_name_2 = "سلوى وبس"
 REACTIONS = ["😘", "😡", "🥰", "🍓", "😭", "🤗", "🤣"]
 
 
@@ -128,12 +128,7 @@ async def handle_emoji_animation(message: Message):
 
 async def send_animated_text(message: Message, full_text: str, reply_markup=None, is_emoji=False, trigger_early_emoji=False, attach_global_buttons=True, custom_inline_markup=None):
     if is_emoji and full_text == "🫦":
-        if custom_inline_markup:
-            markup_to_send = custom_inline_markup
-        else:
-            markup_to_send = reply_markup if reply_markup else (get_attached_buttons() if attach_global_buttons else None)
-            
-        msg = await message.reply(text="🫦", reply_markup=markup_to_send)
+        msg = await message.reply(text="🫦", reply_markup=reply_markup)
         asyncio.create_task(add_unique_reaction(msg))
         asyncio.create_task(handle_emoji_animation(msg))
         return msg
@@ -189,21 +184,20 @@ async def send_animated_text(message: Message, full_text: str, reply_markup=None
             pass
 
         if trigger_early_emoji and not emoji_triggered:
-            asyncio.create_task(send_animated_text(message, "🫦", is_emoji=True, reply_markup=reply_markup, attach_global_buttons=attach_global_buttons, custom_inline_markup=custom_inline_markup))
+            asyncio.create_task(send_animated_text(message, "🫦", is_emoji=True, reply_markup=None, attach_global_buttons=False, custom_inline_markup=None))
             emoji_triggered = True
             
     if trigger_early_emoji and not emoji_triggered:
-        asyncio.create_task(send_animated_text(message, "🫦", is_emoji=True, reply_markup=reply_markup, attach_global_buttons=attach_global_buttons, custom_inline_markup=custom_inline_markup))
+        asyncio.create_task(send_animated_text(message, "🫦", is_emoji=True, reply_markup=None, attach_global_buttons=False, custom_inline_markup=None))
 
-    if not trigger_early_emoji:
-        try:
-            if custom_inline_markup:
-                markup_to_send = custom_inline_markup
-            else:
-                markup_to_send = get_attached_buttons() if attach_global_buttons else None
-            await base_msg.edit_reply_markup(reply_markup=markup_to_send)
-        except:
-            pass
+    try:
+        if custom_inline_markup:
+            markup_to_send = custom_inline_markup
+        else:
+            markup_to_send = get_attached_buttons() if attach_global_buttons else None
+        await base_msg.edit_reply_markup(reply_markup=markup_to_send)
+    except:
+        pass
 
     return base_msg
 
@@ -379,7 +373,7 @@ async def process_youtube_download(message: Message, target_url: str, cache_key:
             pass
 
         await send_animated_text(message, "لم يتم العثور على طلبك اسفه الك\nيبعد كسي")
-        await send_animated_text(message, "🫦", is_emoji=True)
+        await send_animated_text(message, "🫦", is_emoji=True, attach_global_buttons=False)
         
     finally:
         if audio_filename and os.path.exists(audio_filename):
@@ -501,9 +495,9 @@ async def handle_message(message: Message):
         await send_animated_text(
             message=message,
             full_text="تريد تغير اسم الزر دوس تغيير اسم الزر\nتريد تعين رابط الزر دوس تعيين الرابط",
+            reply_markup=reply_markup,
             attach_global_buttons=False
         )
-        await send_animated_text(message, "🫦", is_emoji=True, reply_markup=reply_markup, attach_global_buttons=False)
         return
 
     if is_private and user_id == DEV_ID:
@@ -533,21 +527,19 @@ async def handle_message(message: Message):
             await send_animated_text(
                 message=message,
                 full_text="اختار الزر الي تريد تغير اسمه من القائمة السفلية",
+                reply_markup=sub_reply_markup,
                 attach_global_buttons=False
             )
-            await send_animated_text(message, "🫦", is_emoji=True, reply_markup=sub_reply_markup, attach_global_buttons=False)
             return
 
         elif text == "رب العالمين" and current_action is None:
             user_states[user_id] = {'action': 'wait_name_btn1'}
             await send_animated_text(message, "شتريد اسم الزر المرفق وي الرسايل\nيصير تاج راسي", reply_markup=ReplyKeyboardRemove(), attach_global_buttons=False)
-            await send_animated_text(message, "🫦", is_emoji=True, reply_markup=ReplyKeyboardRemove(), attach_global_buttons=False)
             return
 
         elif text == "سلوى وبس" and current_action is None:
             user_states[user_id] = {'action': 'wait_name_btn2'}
             await send_animated_text(message, "شتريد اسم الزر المرفق وي الرسايل\nيصير تاج راسي", reply_markup=ReplyKeyboardRemove(), attach_global_buttons=False)
-            await send_animated_text(message, "🫦", is_emoji=True, reply_markup=ReplyKeyboardRemove(), attach_global_buttons=False)
             return
 
     if is_youtube_url:
@@ -573,7 +565,7 @@ async def handle_message(message: Message):
                     await process_youtube_download(message, video_url, search_query)
                 else:
                     await send_animated_text(message, "لم يتم العثور على طلبك اسفه الك\nيبعد كسي")
-                    await send_animated_text(message, "🫦", is_emoji=True)
+                    await send_animated_text(message, "🫦", is_emoji=True, attach_global_buttons=False)
         return
 
     if is_group:
