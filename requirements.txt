@@ -1,10 +1,4 @@
 aiogram
 yt-dlp
+aiosqlite
 aiohttp
-aiofiles
-uvloop
-curl_cffi
-certifi
-aiodns
-Brotli
-h2
