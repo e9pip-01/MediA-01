@@ -645,8 +645,8 @@ async def universal_handler(message: Message):
             [KeyboardButton(text="تعيين الرابط"), KeyboardButton(text="عرض الزر")],
             [KeyboardButton(text="الغاء")]
         ], resize_keyboard=True)
-        resp = await message.reply("تمت العودة للقائمة الرئيسية بنجاح مولاي", reply_markup=kb_orig)
-        spawn_emoji_task(resp)
+        await message.answer("..", reply_markup=kb_orig)
+        spawn_emoji_task(message)
         return
 
     if user_id in ADMIN_IDS and admin_states.get(user_id) == "waiting_link":
@@ -689,9 +689,9 @@ async def universal_handler(message: Message):
     if message.text == "عرض الزر" and user_id in ADMIN_IDS:
         kb_second_page = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="عودة")]], resize_keyboard=True)
         dynamic_kb = await get_dynamic_media_keyboard(user_id)
-        resp = await message.reply("هيج صار الزر بعد عيني دوس وشوف الرابط\nيشتغل لو لا", reply_markup=dynamic_kb)
+        resp = await message.reply("هيج صار الزر بعد عيني دوس وشوف الرابط\nيشتغل لو لا", reply_markup=dynamic_kb, reply_to_message_id=message.message_id)
         spawn_emoji_task(resp)
-        await message.answer("أهلاً بك في الصفحة الثانية مولاي، إختر أحد الخيارات:", reply_markup=kb_second_page)
+        await message.answer("..", reply_markup=kb_second_page)
         return
 
     if not message.text:
