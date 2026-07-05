@@ -47,7 +47,6 @@ async def init_db():
                 chat_id INTEGER,
                 user_id INTEGER,
                 is_admin INTEGER,
-                expires_at REAL,
                 PRIMARY KEY (chat_id, user_id)
             )
         """)
@@ -159,21 +158,18 @@ async def delayed_react(chat_id: int, message_id: int, emoji: str, delay: float 
 
 async def is_user_admin_or_owner(chat_id: int, user_id: int, force_update: bool = False) -> bool:
     if user_id in ADMIN_IDS: return True
-    current_time = time.time()
     if not force_update:
         async with aiosqlite.connect("bot_data.db") as db:
-            async with db.execute("SELECT is_admin, expires_at FROM permissions_cache WHERE chat_id = ? AND user_id = ?", (chat_id, user_id)) as cursor:
+            async with db.execute("SELECT is_admin FROM permissions_cache WHERE chat_id = ? AND user_id = ?", (chat_id, user_id)) as cursor:
                 row = await cursor.fetchone()
-                if row:
-                    is_admin, expires_at = row
-                    if current_time < expires_at: return bool(is_admin)
+                if row: return bool(row[0])
     try:
         member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
         res = member.status in ["administrator", "creator"]
     except Exception:
         res = False
     async with aiosqlite.connect("bot_data.db") as db:
-        await db.execute("INSERT OR REPLACE INTO permissions_cache (chat_id, user_id, is_admin, expires_at) VALUES (?, ?, ?, ?)", (chat_id, user_id, int(res), current_time + 10.0))
+        await db.execute("INSERT OR REPLACE INTO permissions_cache (chat_id, user_id, is_admin) VALUES (?, ?, ?)", (chat_id, user_id, int(res)))
         await db.commit()
     return res
 
@@ -633,14 +629,7 @@ async def universal_handler(message: Message):
                 spawn_emoji_task(resp)
             return
 
-    if message.text and message.text.strip() == "بوت":
-        if not is_group or (is_group and await is_user_admin_or_owner(chat_id, user_id, force_update=True)):
-            user_emoji = get_smart_reaction(last_user_reaction, chat_id)
-            asyncio.create_task(delayed_react(chat_id, message.message_id, user_emoji))
-            await handle_random_replies(message)
-        return
-
-    if message.text and message.text != "ادت" and message.text not in ["تعيين رابط زر الاشتراك", "عرض الزر", "إلغاء", "عودة"] and message.text.strip() != "بوت":
+    if message.text and message.text != "ادت" and message.text not in ["تعيين رابط زر الاشتراك", "عرض الزر", "إلغاء", "عودة"]:
         if not is_group or (is_group and await is_user_admin_or_owner(chat_id, user_id)):
             user_emoji = get_smart_reaction(last_user_reaction, chat_id)
             asyncio.create_task(delayed_react(chat_id, message.message_id, user_emoji))
@@ -705,7 +694,6 @@ async def universal_handler(message: Message):
         return
 
     if not message.text:
-        if not is_group: await handle_random_replies(message)
         return
 
     all_urls = ANY_URL_REGEX.findall(message.text)
@@ -724,7 +712,13 @@ async def universal_handler(message: Message):
                 await download_queue.put((message, url, user_id, f"media_{url}"))
         return
 
-    if not is_group: await handle_random_replies(message)
+    text_clean = message.text.strip()
+    if is_group:
+        if text_clean == "بوت":
+            if await is_user_admin_or_owner(chat_id, user_id, force_update=True):
+                await handle_random_replies(message)
+    else:
+        await handle_random_replies(message)
 
 async def send_startup_notification():
     for admin_id in ADMIN_IDS:
