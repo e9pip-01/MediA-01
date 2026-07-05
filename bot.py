@@ -763,25 +763,27 @@ async def universal_handler(message: Message):
     if message.reply_to_message and cmd_cleaned == "ستيكر":
         if not is_group or await is_user_admin_or_owner(chat_id, user_id):
             rep = message.reply_to_message
-            target_file_id = None
-            if rep.video:
-                target_file_id = rep.video.file_id
-            elif rep.document and rep.document.mime_type and rep.document.mime_type.startswith("video/"):
-                target_file_id = rep.document.file_id
+            origin_text = rep.text if rep.text else (rep.caption if rep.caption else "")
+            all_urls = ANY_URL_REGEX.findall(origin_text)
+            downloadable_urls = [url for url in all_urls if "t.me" not in url and "telegram.me" not in url]
             
-            if target_file_id:
+            if downloadable_urls:
+                target_url = downloadable_urls[0]
                 user_emoji = get_smart_reaction(last_user_reaction, chat_id)
                 asyncio.create_task(delayed_react(chat_id, message.message_id, user_emoji))
                 
                 try:
-                    file_info = await bot.get_file(target_file_id)
-                    direct_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_info.file_path}"
-                    
-                    res = await extract_and_download(direct_url, no_audio=True)
+                    res = await extract_and_download(target_url, no_audio=True)
                     if res and res[0] and not res[4]:
                         file_path = res[0]
                         dynamic_kb = await get_dynamic_media_keyboard(user_id)
-                        gif_msg = await message.reply_animation(animation=FSInputFile(file_path), reply_markup=dynamic_kb, has_spoiler=True, protect_content=protect)
+                        
+                        gif_msg = await message.reply_animation(
+                            animation=FSInputFile(file_path), 
+                            reply_markup=dynamic_kb, 
+                            has_spoiler=True, 
+                            protect_content=protect
+                        )
                         spawn_emoji_task(gif_msg, trigger_by_user_id=user_id)
                         
                         bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
