@@ -761,7 +761,7 @@ async def universal_handler(message: Message):
         return
 
     if message.reply_to_message and cmd_cleaned == "ستيكر":
-        if is_group and await is_user_admin_or_owner(chat_id, user_id):
+        if not is_group or await is_user_admin_or_owner(chat_id, user_id):
             rep = message.reply_to_message
             target_file_id = None
             if rep.video:
