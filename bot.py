@@ -97,9 +97,14 @@ def extract_channel_chat_id(url: str):
         return clean
     return None
 
+async def is_custom_link_set() -> bool:
+    sub_link = await get_setting("sub_link", DEFAULT_SUBSCRIBE_LINK)
+    return sub_link != DEFAULT_SUBSCRIBE_LINK
+
 async def check_force_subscription(user_id: int) -> bool:
     if user_id in ADMIN_IDS: return True
     sub_link = await get_setting("sub_link", DEFAULT_SUBSCRIBE_LINK)
+    if sub_link == DEFAULT_SUBSCRIBE_LINK: return True
     target_chat = extract_channel_chat_id(sub_link)
     if not target_chat: return True
     try:
@@ -114,6 +119,18 @@ def get_clean_url(input_str: str) -> str:
     if input_str.startswith("http://") or input_str.startswith("https://"): return input_str
     if input_str.startswith("t.me/"): return f"https://{input_str}"
     return f"https://t.me/{input_str}"
+
+async def get_dynamic_media_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    has_custom = await is_custom_link_set()
+    if not has_custom:
+        return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="رب العالمين", url=DEFAULT_SUBSCRIBE_LINK, style="primary")]])
+    
+    is_subscribed = await check_force_subscription(user_id)
+    if is_subscribed:
+        return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="تواصل مع المطور", url=DEFAULT_SUBSCRIBE_LINK, style="success")]])
+    else:
+        sub_link = await get_setting("sub_link", DEFAULT_SUBSCRIBE_LINK)
+        return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="اشترك بالقناة", url=sub_link, style="primary")]])
 
 async def get_sub_keyboard() -> InlineKeyboardMarkup:
     btn_text = await get_setting("btn_text", DEFAULT_BUTTON_TEXT)
@@ -323,7 +340,7 @@ async def queue_worker():
             async with db.execute("SELECT file_id, media_type, title FROM media_cache WHERE media_key = ?", (cache_key,)) as cursor:
                 cached_row = await cursor.fetchone()
                 
-        sub_kb = await get_sub_keyboard()
+        dynamic_kb = await get_dynamic_media_keyboard(user_id)
         if cached_row:
             file_id, media_type, title = cached_row
             if media_type == "album":
@@ -338,14 +355,14 @@ async def queue_worker():
                     bot_emoji = get_smart_reaction(last_bot_reaction, message.chat.id)
                     asyncio.create_task(delayed_react(message.chat.id, album_msgs[0].message_id, bot_emoji))
             else:
-                video_msg = await message.reply_video(video=file_id, caption="وهذا هوة الفيديو كدامك بالكامل\nالمايعرفني يعرفني شكد قوي", reply_markup=sub_kb)
+                video_msg = await message.reply_video(video=file_id, caption="وهذا هوة الفيديو كدامك بالكامل\nالمايعرفني يعرفني شكد قوي", reply_markup=dynamic_kb)
                 spawn_emoji_task(video_msg)
                 bot_emoji = get_smart_reaction(last_bot_reaction, message.chat.id)
                 asyncio.create_task(delayed_react(message.chat.id, video_msg.message_id, bot_emoji))
             download_queue.task_done()
             continue
 
-        status_msg = await live_typing_reply(message, "يتم العثور والبدء ب استكشاف طلبك\nسيتم ارسال الميديا الان", reply_markup=sub_kb, trigger_emoji_logic=True)
+        status_msg = await live_typing_reply(message, "يتم العثور والبدء ب استكشاف طلبك\nسيتم ارسال الميديا الان", reply_markup=dynamic_kb, trigger_emoji_logic=True)
         file_path = None
         is_img_type = False
         
@@ -397,7 +414,7 @@ async def queue_worker():
                     try: os.rename(file_path, new_file_path); file_path = new_file_path
                     except Exception: pass
 
-                    video_msg = await message.reply_video(video=FSInputFile(file_path), caption="وهذا هوة الفيديو كدامك بالكامل\nالمايعرفني يعرفني شكد قوي", reply_markup=sub_kb)
+                    video_msg = await message.reply_video(video=FSInputFile(file_path), caption="وهذا هوة الفيديو كدامك بالكامل\nالمايعرفني يعرفني شكد قوي", reply_markup=dynamic_kb)
                     spawn_emoji_task(video_msg)
                     if video_msg and video_msg.video:
                         async with aiosqlite.connect("bot_data.db") as db:
@@ -407,10 +424,10 @@ async def queue_worker():
                     asyncio.create_task(delayed_react(message.chat.id, video_msg.message_id, bot_emoji))
             else:
                 if status_msg: await status_msg.delete()
-                err_msg = await live_typing_reply(message, "الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي", reply_markup=sub_kb, trigger_emoji_logic=True)
+                err_msg = await live_typing_reply(message, "الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي", reply_markup=dynamic_kb, trigger_emoji_logic=True)
         except Exception:
             if status_msg: await status_msg.delete()
-            err_msg = await live_typing_reply(message, "الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي", reply_markup=sub_kb, trigger_emoji_logic=True)
+            err_msg = await live_typing_reply(message, "الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي", reply_markup=dynamic_kb, trigger_emoji_logic=True)
         finally:
             if file_path and os.path.exists(file_path):
                 try: os.remove(file_path)
@@ -541,8 +558,8 @@ async def universal_handler(message: Message):
                 if not is_group or (is_group and await is_user_admin_or_owner(chat_id, user_id)):
                     user_emoji = get_smart_reaction(last_user_reaction, chat_id)
                     asyncio.create_task(delayed_react(chat_id, message.message_id, user_emoji))
-                sub_kb = await get_sub_keyboard()
-                gif_msg = await message.reply_animation(animation=video_file_id, reply_markup=sub_kb, has_spoiler=True)
+                dynamic_kb = await get_dynamic_media_keyboard(user_id)
+                gif_msg = await message.reply_animation(animation=video_file_id, reply_markup=dynamic_kb, has_spoiler=True)
                 spawn_emoji_task(gif_msg)
                 if not is_group or (is_group and await is_user_admin_or_owner(chat_id, user_id)):
                     bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
@@ -667,9 +684,9 @@ async def universal_handler(message: Message):
         return
 
     if message.text == "عرض الزر" and user_id in ADMIN_IDS:
-        sub_kb = await get_sub_keyboard()
+        dynamic_kb = await get_dynamic_media_keyboard(user_id)
         kb_cancel = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="الغاء")]], resize_keyboard=True)
-        resp = await message.reply("هيج صار الزر بعد عيني دوس وشوف الرابط\nيشتغل لو لا", reply_markup=sub_kb)
+        resp = await message.reply("هيج صار الزر بعد عيني دوس وشوف الرابط\nيشتغل لو لا", reply_markup=dynamic_kb)
         await bot.send_message(chat_id=chat_id, text="اضغط 'الغاء' للعودة للقائمة الرئيسية ↩️", reply_markup=kb_cancel)
         spawn_emoji_task(resp)
         return
