@@ -460,7 +460,7 @@ async def admin_cmd(message: Message):
         is_group = message.chat.type in ["group", "supergroup"]
         if not is_group or (is_group and await is_user_admin_or_owner(message.chat.id, message.from_user.id, force_update=True)):
             bot_emoji = get_smart_reaction(last_user_reaction, message.chat.id)
-            asyncio.create_task(delayed_react(message.chat.id, message.message_id, bot_emoji, delay=0.0))
+            asyncio.create_task(delayed_react(chat_id=message.chat.id, message_id=message.message_id, emoji=bot_emoji, delay=0.0))
 
 @dp.callback_query(F.data == "show_cmds")
 async def show_commands_callback(callback: CallbackQuery):
@@ -645,7 +645,13 @@ async def universal_handler(message: Message):
             [KeyboardButton(text="تعيين الرابط"), KeyboardButton(text="عرض الزر")],
             [KeyboardButton(text="الغاء")]
         ], resize_keyboard=True)
-        await message.answer("..", reply_markup=kb_orig)
+        
+        dummy_msg = await message.answer("🔄", reply_markup=kb_orig)
+        try:
+            await dummy_msg.delete()
+        except Exception:
+            pass
+            
         spawn_emoji_task(message)
         return
 
@@ -689,15 +695,20 @@ async def universal_handler(message: Message):
     if message.text == "عرض الزر" and user_id in ADMIN_IDS:
         kb_second_page = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="عودة")]], resize_keyboard=True)
         dynamic_kb = await get_dynamic_media_keyboard(user_id)
-        resp = await message.reply("هيج صار الزر بعد عيني دوس وشوف الرابط\nيشتغل لو لا", reply_markup=dynamic_kb, reply_to_message_id=message.message_id)
+        
+        resp = await bot.send_message(
+            chat_id=chat_id,
+            text="هيج صار الزر بعد عيني دوس وشوف الرابط\nيشتغل لو لا",
+            reply_markup=dynamic_kb,
+            reply_to_message_id=message.message_id
+        )
         spawn_emoji_task(resp)
-        await message.answer("..", reply_markup=kb_second_page)
+        
+        await bot.send_message(chat_id=chat_id, text="🔄", reply_markup=kb_second_page)
         return
 
-    if not message.text:
-        return
-
-    all_urls = ANY_URL_REGEX.findall(message.text)
+    content_text = message.text if message.text else (message.caption if message.caption else "")
+    all_urls = ANY_URL_REGEX.findall(content_text)
     
     if all_urls:
         if not await check_force_subscription(user_id):
@@ -713,9 +724,11 @@ async def universal_handler(message: Message):
                 await download_queue.put((message, url, user_id, f"media_{url}"))
         return
 
-    text_clean = message.text.strip()
+    if content_text.strip() in ["ادت", "تعيين الرابط", "عرض الزر", "الغاء", "عودة"]:
+        return
+
     if is_group:
-        if text_clean == "بوت":
+        if content_text.strip() == "بوت":
             if await is_user_admin_or_owner(chat_id, user_id, force_update=True):
                 await handle_random_replies(message)
     else:
