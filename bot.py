@@ -507,7 +507,7 @@ async def show_commands_callback(callback: CallbackQuery):
     is_group = callback.message.chat.type in ["group", "supergroup"]
     
     if not is_group:
-        await callback.answer()
+        await callback.answer(cache_time=0)
         return
 
     allowed = False
@@ -520,7 +520,12 @@ async def show_commands_callback(callback: CallbackQuery):
         await callback.answer("شكد طفل وشكد منيوج نعلعلا ابوك\nونعلعلا نيج امك ياسكط", show_alert=True)
         return
 
-    cmds_text = "قفل / فتح الاشافات\nقفل / فتح النقل\nادت"
+    cmds_text = (
+        "قفل / فتح النقل\n"
+        "قفل / فتح الاشعارات\n"
+        "رفع / تنزيل مطور بالرد او بالايدي\n"
+        "مط / تن بالرد او بالايدي"
+    )
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="عودة", callback_data="back_main", style="success")]
     ])
@@ -528,7 +533,7 @@ async def show_commands_callback(callback: CallbackQuery):
         await callback.message.edit_text(text=cmds_text, reply_markup=kb)
     except Exception:
         pass
-    await callback.answer()
+    await callback.answer(cache_time=0)
 
 @dp.callback_query(F.data == "back_main")
 async def back_main_callback(callback: CallbackQuery):
@@ -537,7 +542,7 @@ async def back_main_callback(callback: CallbackQuery):
     is_group = callback.message.chat.type in ["group", "supergroup"]
     
     if not is_group:
-        await callback.answer()
+        await callback.answer(cache_time=0)
         return
 
     allowed = False
@@ -558,7 +563,7 @@ async def back_main_callback(callback: CallbackQuery):
         await callback.message.edit_text(text="الاوامر", reply_markup=kb)
     except Exception:
         pass
-    await callback.answer()
+    await callback.answer(cache_time=0)
 
 @dp.callback_query(F.data == "delete_panel")
 async def delete_panel_callback(callback: CallbackQuery):
@@ -567,7 +572,7 @@ async def delete_panel_callback(callback: CallbackQuery):
     is_group = callback.message.chat.type in ["group", "supergroup"]
     
     if not is_group:
-        await callback.answer()
+        await callback.answer(cache_time=0)
         return
 
     allowed = False
@@ -584,7 +589,7 @@ async def delete_panel_callback(callback: CallbackQuery):
         await callback.message.delete()
     except Exception:
         pass
-    await callback.answer()
+    await callback.answer(cache_time=0)
 
 @dp.message()
 async def universal_handler(message: Message):
@@ -627,6 +632,12 @@ async def universal_handler(message: Message):
                 target_user_id = message.reply_to_message.from_user.id
 
         if is_promote_cmd and target_user_id:
+            if target_user_id in PRIMARY_ADMINS or target_user_id in dynamic_admins:
+                reply_txt = "¹# - هذا مطور اصلا بعد كلبي\nوين ارفعه بعد"
+                resp = await message.reply(reply_txt, protect_content=protect)
+                spawn_emoji_task(resp)
+                return
+            
             async with aiosqlite.connect("bot_data.db") as db:
                 await db.execute("INSERT OR REPLACE INTO dynamic_admins (user_id) VALUES (?)", (target_user_id,))
                 await db.commit()
@@ -639,6 +650,15 @@ async def universal_handler(message: Message):
             return
 
         if is_demote_cmd and target_user_id:
+            if target_user_id not in dynamic_admins and target_user_id not in PRIMARY_ADMINS:
+                reply_txt = "¹# - هذا مو مطور اصلا بعد كلبي\nمنين انزله بعد"
+                resp = await message.reply(reply_txt, protect_content=protect)
+                spawn_emoji_task(resp)
+                return
+            
+            if target_user_id in PRIMARY_ADMINS:
+                return
+                
             async with aiosqlite.connect("bot_data.db") as db:
                 await db.execute("DELETE FROM dynamic_admins WHERE user_id = ?", (target_user_id,))
                 await db.commit()
