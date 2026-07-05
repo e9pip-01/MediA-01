@@ -500,23 +500,18 @@ async def admin_cmd(message: Message):
         if not is_group:
             await handle_random_replies(message)
 
-@dp.callback_query(F.data == "show_cmds")
+@dp.callback_query(F.data.startswith("show_cmds:"))
 async def show_commands_callback(callback: CallbackQuery):
     chat_id = callback.message.chat.id
     user_id = callback.from_user.id
+    creator_id = int(callback.data.split(":")[1])
     is_group = callback.message.chat.type in ["group", "supergroup"]
     
     if not is_group:
         await callback.answer(cache_time=0)
         return
 
-    allowed = False
-    if is_all_admins(user_id):
-        allowed = True
-    elif is_group:
-        allowed = await is_user_owner(chat_id, user_id)
-        
-    if not allowed:
+    if user_id != creator_id:
         await callback.answer("شكد طفل وشكد منيوج نعلعلا ابوك\nونعلعلا نيج امك ياسكط", show_alert=True)
         return
 
@@ -527,7 +522,7 @@ async def show_commands_callback(callback: CallbackQuery):
         "مط / تن بالرد او بالايدي"
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="عودة", callback_data="back_main", style="success")]
+        [InlineKeyboardButton(text="عودة", callback_data=f"back_main:{creator_id}", style="success")]
     ])
     try:
         await callback.message.edit_text(text=cmds_text, reply_markup=kb)
@@ -535,29 +530,24 @@ async def show_commands_callback(callback: CallbackQuery):
         pass
     await callback.answer(cache_time=0)
 
-@dp.callback_query(F.data == "back_main")
+@dp.callback_query(F.data.startswith("back_main:"))
 async def back_main_callback(callback: CallbackQuery):
     chat_id = callback.message.chat.id
     user_id = callback.from_user.id
+    creator_id = int(callback.data.split(":")[1])
     is_group = callback.message.chat.type in ["group", "supergroup"]
     
     if not is_group:
         await callback.answer(cache_time=0)
         return
 
-    allowed = False
-    if is_all_admins(user_id):
-        allowed = True
-    elif is_group:
-        allowed = await is_user_owner(chat_id, user_id)
-        
-    if not allowed:
+    if user_id != creator_id:
         await callback.answer("شكد طفل وشكد منيوج نعلعلا ابوك\nونعلعلا نيج امك ياسكط", show_alert=True)
         return
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="قفل / فتح", callback_data="show_cmds", style="primary")],
-        [InlineKeyboardButton(text="مسح", callback_data="delete_panel", style="danger")]
+        [InlineKeyboardButton(text="قفل / فتح", callback_data=f"show_cmds:{creator_id}", style="primary")],
+        [InlineKeyboardButton(text="مسح", callback_data=f"delete_panel:{creator_id}", style="danger")]
     ])
     try:
         await callback.message.edit_text(text="الاوامر", reply_markup=kb)
@@ -565,23 +555,18 @@ async def back_main_callback(callback: CallbackQuery):
         pass
     await callback.answer(cache_time=0)
 
-@dp.callback_query(F.data == "delete_panel")
+@dp.callback_query(F.data.startswith("delete_panel:"))
 async def delete_panel_callback(callback: CallbackQuery):
     chat_id = callback.message.chat.id
     user_id = callback.from_user.id
+    creator_id = int(callback.data.split(":")[1])
     is_group = callback.message.chat.type in ["group", "supergroup"]
     
     if not is_group:
         await callback.answer(cache_time=0)
         return
 
-    allowed = False
-    if is_all_admins(user_id):
-        allowed = True
-    elif is_group:
-        allowed = await is_user_owner(chat_id, user_id)
-        
-    if not allowed:
+    if user_id != creator_id:
         await callback.answer("شكد طفل وشكد منيوج نعلعلا ابوك\nونعلعلا نيج امك ياسكط", show_alert=True)
         return
 
@@ -749,8 +734,8 @@ async def universal_handler(message: Message):
     if cmd_cleaned == "الاوامر":
         if is_all_admins(user_id) or (is_group and await is_user_owner(chat_id, user_id)):
             kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="قفل / فتح", callback_data="show_cmds", style="primary")],
-                [InlineKeyboardButton(text="مسح", callback_data="delete_panel", style="danger")]
+                [InlineKeyboardButton(text="قفل / فتح", callback_data=f"show_cmds:{user_id}", style="primary")],
+                [InlineKeyboardButton(text="مسح", callback_data=f"delete_panel:{user_id}", style="danger")]
             ])
             resp = await message.reply("الاوامر", reply_markup=kb, protect_content=protect)
             spawn_emoji_task(resp)
