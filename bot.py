@@ -455,7 +455,10 @@ async def handle_random_replies(message: Message):
 @dp.message(F.text == "ادت")
 async def admin_cmd(message: Message):
     if message.from_user.id in ADMIN_IDS:
-        kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="تعيين رابط زر الاشتراك"), KeyboardButton(text="عرض الزر")]], resize_keyboard=True)
+        kb = ReplyKeyboardMarkup(keyboard=[
+            [KeyboardButton(text="تعيين رابط زر الاشتراك"), KeyboardButton(text="عرض الزر")],
+            [KeyboardButton(text="إلغاء")]
+        ], resize_keyboard=True)
         resp = await message.reply("تريد تغير اسم الزر دوس تغيير اسم الزر\nتريد تعين رابط الزر دوس تعيين الرابط", reply_markup=kb)
         spawn_emoji_task(resp)
     else:
@@ -637,21 +640,33 @@ async def universal_handler(message: Message):
             await handle_random_replies(message)
         return
 
-    if message.text and message.text != "ادت" and message.text not in ["تعيين رابط زر الاشتراك", "عرض الزر", "الغاء"] and message.text.strip() != "بوت":
+    if message.text and message.text != "ادت" and message.text not in ["تعيين رابط زر الاشتراك", "عرض الزر", "إلغاء", "عودة"] and message.text.strip() != "بوت":
         if not is_group or (is_group and await is_user_admin_or_owner(chat_id, user_id)):
             user_emoji = get_smart_reaction(last_user_reaction, chat_id)
             asyncio.create_task(delayed_react(chat_id, message.message_id, user_emoji))
 
-    if message.text == "الغاء" and user_id in ADMIN_IDS:
+    if message.text == "إلغاء" and user_id in ADMIN_IDS:
         admin_states.pop(user_id, None)
-        kb_orig = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="تعيين رابط زر الاشتراك"), KeyboardButton(text="عرض الزر")]], resize_keyboard=True)
-        resp = await message.reply("صار وتدلل\nمنو يكدر يعصيك يبعد كسي اه", reply_markup=kb_orig)
+        resp = await message.reply("صار وتدلل\nمنو يكدر يعصيك يبعد كسي اه", reply_markup=ReplyKeyboardRemove())
+        spawn_emoji_task(resp)
+        return
+
+    if message.text == "عودة" and user_id in ADMIN_IDS:
+        admin_states.pop(user_id, None)
+        kb_orig = ReplyKeyboardMarkup(keyboard=[
+            [KeyboardButton(text="تعيين رابط زر الاشتراك"), KeyboardButton(text="عرض الزر")],
+            [KeyboardButton(text="إلغاء")]
+        ], resize_keyboard=True)
+        resp = await message.reply("تمت العودة للقائمة الرئيسية بنجاح مولاي", reply_markup=kb_orig)
         spawn_emoji_task(resp)
         return
 
     if user_id in ADMIN_IDS and admin_states.get(user_id) == "waiting_link":
         admin_states.pop(user_id, None)
-        kb_orig = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="تعيين رابط زر الاشتراك"), KeyboardButton(text="عرض الزر")]], resize_keyboard=True)
+        kb_orig = ReplyKeyboardMarkup(keyboard=[
+            [KeyboardButton(text="تعيين رابط زر الاشتراك"), KeyboardButton(text="عرض الزر")],
+            [KeyboardButton(text="إلغاء")]
+        ], resize_keyboard=True)
         if message.text:
             text_val = message.text.strip()
             pure_username = text_val
@@ -678,16 +693,14 @@ async def universal_handler(message: Message):
 
     if message.text == "تعيين رابط زر الاشتراك" and user_id in ADMIN_IDS:
         admin_states[user_id] = "waiting_link"
-        kb_cancel = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="الغاء")]], resize_keyboard=True)
-        resp = await message.reply("ارسل يوزر / رابط القناة او الكروب\nيلا مولاي", reply_markup=kb_cancel)
+        kb_back = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="عودة")]], resize_keyboard=True)
+        resp = await message.reply("ارسل يوزر / رابط القناة او الكروب\nيلا مولاي", reply_markup=kb_back)
         spawn_emoji_task(resp)
         return
 
     if message.text == "عرض الزر" and user_id in ADMIN_IDS:
         dynamic_kb = await get_dynamic_media_keyboard(user_id)
-        kb_cancel = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="الغاء")]], resize_keyboard=True)
         resp = await message.reply("هيج صار الزر بعد عيني دوس وشوف الرابط\nيشتغل لو لا", reply_markup=dynamic_kb)
-        await bot.send_message(chat_id=chat_id, text="اضغط 'الغاء' للعودة للقائمة الرئيسية ↩️", reply_markup=kb_cancel)
         spawn_emoji_task(resp)
         return
 
