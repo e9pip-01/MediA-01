@@ -83,6 +83,12 @@ async def init_db():
                 user_id INTEGER PRIMARY KEY
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS bot_users (
+                user_id INTEGER PRIMARY KEY,
+                username TEXT
+            )
+        """)
         await db.commit()
         
     await load_dynamic_admins()
@@ -93,6 +99,13 @@ async def load_dynamic_admins():
         async with db.execute("SELECT user_id FROM dynamic_admins") as cursor:
             rows = await cursor.fetchall()
             dynamic_admins = {row[0] for row in rows}
+
+async def register_user(user_id: int, username: str):
+    if not user_id:
+        return
+    async with aiosqlite.connect("bot_data.db") as db:
+        await db.execute("INSERT OR REPLACE INTO bot_users (user_id, username) VALUES (?, ?)", (user_id, username or ""))
+        await db.commit()
 
 def is_all_admins(user_id: int) -> bool:
     return user_id in PRIMARY_ADMINS or user_id in dynamic_admins
@@ -261,7 +274,7 @@ def analyze_media(info_dict: dict) -> tuple[str, str]:
         return "video", ext
     return "unknown", ext
 
-async def live_typing_reply(message: Message, full_text: str, reply_markup=None, trigger_emoji_logic: bool = False) -> Message:
+async def live_typing_reply(message: Message, full_text: str, reply_markup=None, trigger_emoji_logic: bool = False, parse_mode=None) -> Message:
     lines = full_text.split('\n')
     chunked_lines = []
     for line in lines:
@@ -290,11 +303,11 @@ async def live_typing_reply(message: Message, full_text: str, reply_markup=None,
         if not visible_text.strip(): continue
             
         if sent_msg is None:
-            sent_msg = await message.reply(visible_text, protect_content=protect)
+            sent_msg = await message.reply(visible_text, protect_content=protect, parse_mode=parse_mode)
             modification_count = 0
         else:
             try:
-                await sent_msg.edit_text(visible_text)
+                await sent_msg.edit_text(visible_text, parse_mode=parse_mode)
                 modification_count += 1
             except Exception:
                 pass
@@ -502,7 +515,6 @@ async def admin_cmd(message: Message):
 
 @dp.callback_query(F.data.startswith("show_cmds:"))
 async def show_commands_callback(callback: CallbackQuery):
-    chat_id = callback.message.chat.id
     user_id = callback.from_user.id
     creator_id = int(callback.data.split(":")[1])
     
@@ -511,23 +523,46 @@ async def show_commands_callback(callback: CallbackQuery):
         return
 
     cmds_text = (
-        "قفل / فتح النقل\n"
-        "قفل / فتح الاشعارات\n"
-        "رفع / تنزيل مطور بالرد او بالايدي\n"
-        "مط / تن بالرد او بالايدي"
+        "||الاوامر والتعليمات||\n\n"
+        "`قفل` / `النقل`\n"
+        "`فتح` / `الاشعارات`\n"
+        "`رفع` `تنزيل مطور`\n"
+        "`مط` `تن` / بالرد او بالايدي"
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="عودة", callback_data=f"back_main:{creator_id}", style="success")]
     ])
     try:
-        await callback.message.edit_text(text=cmds_text, reply_markup=kb)
+        await callback.message.edit_text(text=cmds_text, reply_markup=kb, parse_mode="MarkdownV2")
+    except Exception:
+        pass
+    await callback.answer(cache_time=0)
+
+@dp.callback_query(F.data.startswith("show_info:"))
+async def show_info_callback(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    creator_id = int(callback.data.split(":")[1])
+    
+    if user_id != creator_id:
+        await callback.answer("شكد طفل وشكد منيوج نعلعلا ابوك\nونعلعلا نيج امك ياسكط", show_alert=True)
+        return
+
+    info_text = (
+        "||الاوامر والتعليمات||\n\n"
+        "`عرض المطورين`\n"
+        "`عرض مستعملين البوت`"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="عودة", callback_data=f"back_main:{creator_id}", style="success")]
+    ])
+    try:
+        await callback.message.edit_text(text=info_text, reply_markup=kb, parse_mode="MarkdownV2")
     except Exception:
         pass
     await callback.answer(cache_time=0)
 
 @dp.callback_query(F.data.startswith("back_main:"))
 async def back_main_callback(callback: CallbackQuery):
-    chat_id = callback.message.chat.id
     user_id = callback.from_user.id
     creator_id = int(callback.data.split(":")[1])
     
@@ -536,18 +571,20 @@ async def back_main_callback(callback: CallbackQuery):
         return
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="قفل / فتح", callback_data=f"show_cmds:{creator_id}", style="primary")],
+        [
+            InlineKeyboardButton(text="عرض المعلومات", callback_data=f"show_info:{creator_id}", style="secondary"),
+            InlineKeyboardButton(text="قفل / فتح", callback_data=f"show_cmds:{creator_id}", style="primary")
+        ],
         [InlineKeyboardButton(text="مسح", callback_data=f"delete_panel:{creator_id}", style="danger")]
     ])
     try:
-        await callback.message.edit_text(text="الاوامر", reply_markup=kb)
+        await callback.message.edit_text(text="||الاوامر والتعليمات||", reply_markup=kb, parse_mode="MarkdownV2")
     except Exception:
         pass
     await callback.answer(cache_time=0)
 
 @dp.callback_query(F.data.startswith("delete_panel:"))
 async def delete_panel_callback(callback: CallbackQuery):
-    chat_id = callback.message.chat.id
     user_id = callback.from_user.id
     creator_id = int(callback.data.split(":")[1])
     
@@ -565,12 +602,22 @@ async def delete_panel_callback(callback: CallbackQuery):
 async def universal_handler(message: Message):
     global welcome_state, dynamic_admins
     user_id = message.from_user.id if message.from_user else 0
+    username = message.from_user.username if message.from_user else ""
     chat_id = message.chat.id
     is_group = message.chat.type in ["group", "supergroup"]
     is_channel = message.chat.type == "channel"
     protect = await is_content_protected(chat_id)
 
+    await register_user(user_id, username)
+
     cmd_cleaned = message.text.strip() if message.text else ""
+
+    if cmd_cleaned and message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_bot:
+        if cmd_cleaned in ["رفع مطور", "مط", "تنزيل مطور", "تن"] or cmd_cleaned.startswith(("رفع مطور ", "مط ", "تنزيل مطور ", "تن ")):
+            if user_id in PRIMARY_ADMINS:
+                resp = await message.reply("¹# -  لايمكنك استعمال الاوامر\nعلى البوتات", protect_content=protect)
+                spawn_emoji_task(resp)
+                return
 
     if user_id in PRIMARY_ADMINS and cmd_cleaned:
         target_user_id = None
@@ -602,6 +649,15 @@ async def universal_handler(message: Message):
                 target_user_id = message.reply_to_message.from_user.id
 
         if is_promote_cmd and target_user_id:
+            try:
+                chk_user = await bot.get_chat(target_user_id)
+                if chk_user.type == "private" and getattr(chk_user, "is_bot", False):
+                    resp = await message.reply("¹# -  لايمكنك استعمال الاوامر\nعلى البوتات", protect_content=protect)
+                    spawn_emoji_task(resp)
+                    return
+            except Exception:
+                pass
+
             if target_user_id in PRIMARY_ADMINS or target_user_id in dynamic_admins:
                 reply_txt = "¹# - هذا مطور اصلا بعد كلبي\nوين ارفعه بعد"
                 resp = await message.reply(reply_txt, protect_content=protect)
@@ -719,14 +775,53 @@ async def universal_handler(message: Message):
     if cmd_cleaned == "الاوامر":
         if is_all_admins(user_id) or (is_group and await is_user_owner(chat_id, user_id)) or (not is_group and not is_channel):
             kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="قفل / فتح", callback_data=f"show_cmds:{user_id}", style="primary")],
+                [
+                    InlineKeyboardButton(text="عرض المعلومات", callback_data=f"show_info:{user_id}", style="secondary"),
+                    InlineKeyboardButton(text="قفل / فتح", callback_data=f"show_cmds:{user_id}", style="primary")
+                ],
                 [InlineKeyboardButton(text="مسح", callback_data=f"delete_panel:{user_id}", style="danger")]
             ])
-            resp = await message.reply("الاوامر", reply_markup=kb, protect_content=protect)
+            resp = await message.reply("||الاوامر والتعليمات||", reply_markup=kb, protect_content=protect, parse_mode="MarkdownV2")
             spawn_emoji_task(resp)
         else:
             if not is_group and not is_channel:
                 await handle_random_replies(message)
+        return
+
+    if cmd_cleaned == "عرض المطورين":
+        if is_all_admins(user_id) or (is_group and await is_user_owner(chat_id, user_id)) or (not is_group and not is_channel):
+            devs_output = []
+            for d_id in PRIMARY_ADMINS:
+                u_link = f"tg://user?id={d_id}"
+                devs_output.append(f"[{d_id}]({u_link}) \\- ¹#\n@||Owner||")
+            for d_id in dynamic_admins:
+                u_link = f"tg://user?id={d_id}"
+                devs_output.append(f"[{d_id}]({u_link}) \\- ¹#\n@||SubDev||")
+            
+            final_text = "\n\n".join(devs_output)
+            if not final_text:
+                final_text = "لا يوجد مطورين"
+            await live_typing_reply(message, final_text, parse_mode="MarkdownV2", trigger_emoji_logic=True)
+        return
+
+    if cmd_cleaned == "عرض مستعملين البوت":
+        if is_all_admins(user_id) or (is_group and await is_user_owner(chat_id, user_id)) or (not is_group and not is_channel):
+            async with aiosqlite.connect("bot_data.db") as db:
+                async with db.execute("SELECT user_id, username FROM bot_users LIMIT 50") as cursor:
+                    rows = await cursor.fetchall()
+            
+            users_output = []
+            for r in rows:
+                u_id, u_name = r
+                u_link = f"tg://user?id={u_id}"
+                display_name = u_name if u_name else "User"
+                escaped_name = display_name.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace(']', '\\]').replace('(', '\\(').replace(')', '\\)').replace('~', '\\~').replace('`', '\\`').replace('>', '\\>').replace('#', '\\#').replace('+', '\\+').replace('-', '\\-').replace('=', '\\=').replace('|', '\\|').replace('{', '\\{').replace('}', '\\}').replace('.', '\\.').replace('!', '\\!')
+                users_output.append(f"[{u_id}]({u_link}) \\- ¹#\n@||{escaped_name}||")
+            
+            final_text = "\n\n".join(users_output)
+            if not final_text:
+                final_text = "لا يوجد مستخدمين مسجلين"
+            await live_typing_reply(message, final_text, parse_mode="MarkdownV2", trigger_emoji_logic=True)
         return
 
     if cmd_cleaned in ["قفل الاشعارات", "فتح الاشعارات"]:
@@ -828,7 +923,7 @@ async def universal_handler(message: Message):
         spawn_emoji_task(resp)
         return
 
-    if message.text and message.text != "ادت" and message.text not in ["تعيين الرابط", "عرض الزر", "الغاء", "عودة", "قفل النقل", "فتح النقل", "قفل الاشعارات", "فتح الاشعارات", "الاوامر"]:
+    if message.text and message.text != "ادت" and message.text not in ["تعيين الرابط", "عرض الزر", "الغاء", "عودة", "قفل النقل", "فتح النقل", "قفل الاشعارات", "فتح الاشعارات", "الاوامر", "عرض المطورين", "عرض مستعملين البوت"]:
         if is_group and await is_user_admin_or_owner(chat_id, user_id):
             user_emoji = get_smart_reaction(last_user_reaction, chat_id)
             asyncio.create_task(delayed_react(chat_id, message.message_id, user_emoji))
@@ -853,7 +948,7 @@ async def universal_handler(message: Message):
                 await download_queue.put((message, url, user_id, f"media_{url}"))
         return
 
-    if content_text.strip() in ["ادت", "تعيين الرابط", "عرض الزر", "الغاء", "عودة", "قفل النقل", "فتح النقل", "قفل الاشعارات", "فتح الاشعارات", "الاوامر", "رفع مطور", "تنزيل مطور", "مط", "تن"] or content_text.strip().startswith(("رفع مطور ", "تنزيل مطور ", "مط ", "تن ")):
+    if content_text.strip() in ["ادت", "تعيين الرابط", "عرض الزر", "الغاء", "عودة", "قفل النقل", "فتح النقل", "قفل الاشعارات", "فتح الاشعارات", "الاوامر", "رفع مطور", "تنزيل مطور", "مط", "تن", "عرض المطورين", "عرض مستعملين البوت"] or content_text.strip().startswith(("رفع مطور ", "تنزيل مطور ", "مط ", "تن ")):
         return
 
     if is_group:
