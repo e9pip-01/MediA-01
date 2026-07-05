@@ -22,7 +22,9 @@ welcome_state = True
 active_emoji_tasks = {}
 admin_states = {}
 
-ADMIN_IDS = [8597653867, 8467593882]
+PRIMARY_ADMINS = [8597653867, 8467593882]
+dynamic_admins = set()
+
 DEFAULT_SUBSCRIBE_LINK = "tg://user?id=8597653867"
 DEFAULT_BUTTON_TEXT = "رب العالمين"
 DEFAULT_BUTTON_STYLE = "primary"
@@ -76,7 +78,24 @@ async def init_db():
                 status TEXT
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS dynamic_admins (
+                user_id INTEGER PRIMARY KEY
+            )
+        """)
         await db.commit()
+        
+    await load_dynamic_admins()
+
+async def load_dynamic_admins():
+    global dynamic_admins
+    async with aiosqlite.connect("bot_data.db") as db:
+        async with db.execute("SELECT user_id FROM dynamic_admins") as cursor:
+            rows = await cursor.fetchall()
+            dynamic_admins = {row[0] for row in rows}
+
+def is_all_admins(user_id: int) -> bool:
+    return user_id in PRIMARY_ADMINS or user_id in dynamic_admins
 
 async def get_setting(key: str, default: str) -> str:
     async with aiosqlite.connect("bot_data.db") as db:
@@ -114,7 +133,7 @@ async def is_custom_link_set() -> bool:
     return sub_link != DEFAULT_SUBSCRIBE_LINK
 
 async def check_force_subscription(user_id: int) -> bool:
-    if user_id in ADMIN_IDS: return True
+    if is_all_admins(user_id): return True
     sub_link = await get_setting("sub_link", DEFAULT_SUBSCRIBE_LINK)
     if sub_link == DEFAULT_SUBSCRIBE_LINK: return True
     target_chat = extract_channel_chat_id(sub_link)
@@ -170,7 +189,7 @@ async def delayed_react(chat_id: int, message_id: int, emoji: str, delay: float 
         pass
 
 async def is_user_admin_or_owner(chat_id: int, user_id: int, force_update: bool = False) -> bool:
-    if user_id in ADMIN_IDS: return True
+    if is_all_admins(user_id): return True
     if not force_update:
         async with aiosqlite.connect("bot_data.db") as db:
             async with db.execute("SELECT is_admin FROM permissions_cache WHERE chat_id = ? AND user_id = ?", (chat_id, user_id)) as cursor:
@@ -187,7 +206,7 @@ async def is_user_admin_or_owner(chat_id: int, user_id: int, force_update: bool 
     return res
 
 async def is_user_owner(chat_id: int, user_id: int) -> bool:
-    if user_id in ADMIN_IDS: return True
+    if is_all_admins(user_id): return True
     try:
         member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
         return member.status == "creator"
@@ -469,7 +488,7 @@ async def handle_random_replies(message: Message):
 
 @dp.message(F.text == "ادت")
 async def admin_cmd(message: Message):
-    if message.from_user.id in ADMIN_IDS:
+    if is_all_admins(message.from_user.id):
         kb = ReplyKeyboardMarkup(keyboard=[
             [KeyboardButton(text="تعيين الرابط"), KeyboardButton(text="عرض الزر")],
             [KeyboardButton(text="الغاء")]
@@ -478,9 +497,8 @@ async def admin_cmd(message: Message):
         spawn_emoji_task(resp)
     else:
         is_group = message.chat.type in ["group", "supergroup"]
-        if not is_group or (is_group and await is_user_admin_or_owner(message.chat.id, message.from_user.id, force_update=True)):
-            bot_emoji = get_smart_reaction(last_user_reaction, message.chat.id)
-            asyncio.create_task(delayed_react(chat_id=message.chat.id, message_id=message.message_id, emoji=bot_emoji, delay=0.0))
+        if not is_group:
+            await handle_random_replies(message)
 
 @dp.callback_query(F.data == "show_cmds")
 async def show_commands_callback(callback: CallbackQuery):
@@ -488,8 +506,12 @@ async def show_commands_callback(callback: CallbackQuery):
     user_id = callback.from_user.id
     is_group = callback.message.chat.type in ["group", "supergroup"]
     
+    if not is_group:
+        await callback.answer()
+        return
+
     allowed = False
-    if user_id in ADMIN_IDS:
+    if is_all_admins(user_id):
         allowed = True
     elif is_group:
         allowed = await is_user_owner(chat_id, user_id)
@@ -498,7 +520,7 @@ async def show_commands_callback(callback: CallbackQuery):
         await callback.answer("شكد طفل وشكد منيوج نعلعلا ابوك\nونعلعلا نيج امك ياسكط", show_alert=True)
         return
 
-    cmds_text = "قفل / فتح الاشعارات\nقفل / فتح النقل\nادت"
+    cmds_text = "قفل / فتح الاشافات\nقفل / فتح النقل\nادت"
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="عودة", callback_data="back_main", style="success")]
     ])
@@ -514,8 +536,12 @@ async def back_main_callback(callback: CallbackQuery):
     user_id = callback.from_user.id
     is_group = callback.message.chat.type in ["group", "supergroup"]
     
+    if not is_group:
+        await callback.answer()
+        return
+
     allowed = False
-    if user_id in ADMIN_IDS:
+    if is_all_admins(user_id):
         allowed = True
     elif is_group:
         allowed = await is_user_owner(chat_id, user_id)
@@ -540,8 +566,12 @@ async def delete_panel_callback(callback: CallbackQuery):
     user_id = callback.from_user.id
     is_group = callback.message.chat.type in ["group", "supergroup"]
     
+    if not is_group:
+        await callback.answer()
+        return
+
     allowed = False
-    if user_id in ADMIN_IDS:
+    if is_all_admins(user_id):
         allowed = True
     elif is_group:
         allowed = await is_user_owner(chat_id, user_id)
@@ -558,14 +588,70 @@ async def delete_panel_callback(callback: CallbackQuery):
 
 @dp.message()
 async def universal_handler(message: Message):
-    global welcome_state
-    user_id = message.from_user.id
+    global welcome_state, dynamic_admins
+    user_id = message.from_user.id if message.from_user else 0
     chat_id = message.chat.id
     is_group = message.chat.type in ["group", "supergroup"]
+    is_channel = message.chat.type == "channel"
     protect = await is_content_protected(chat_id)
 
-    if message.reply_to_message and message.text and message.text.strip() == "ستيكر":
-        if not is_group or (is_group and await is_user_admin_or_owner(chat_id, user_id)):
+    cmd_cleaned = message.text.strip() if message.text else ""
+
+    if user_id in PRIMARY_ADMINS and cmd_cleaned:
+        target_user_id = None
+        is_promote_cmd = False
+        is_demote_cmd = False
+
+        if cmd_cleaned.startswith("رفع مطور ") or cmd_cleaned.startswith("مط "):
+            is_promote_cmd = True
+            parts = cmd_cleaned.split()
+            if len(parts) >= 2:
+                potential_id = parts[-1]
+                if potential_id.isdigit():
+                    target_user_id = int(potential_id)
+        elif cmd_cleaned in ["رفع مطور", "مط"]:
+            if message.reply_to_message and message.reply_to_message.from_user:
+                is_promote_cmd = True
+                target_user_id = message.reply_to_message.from_user.id
+
+        if cmd_cleaned.startswith("تنزيل مطور ") or cmd_cleaned.startswith("تن "):
+            is_demote_cmd = True
+            parts = cmd_cleaned.split()
+            if len(parts) >= 2:
+                potential_id = parts[-1]
+                if potential_id.isdigit():
+                    target_user_id = int(potential_id)
+        elif cmd_cleaned in ["تنزيل مطور", "تن"]:
+            if message.reply_to_message and message.reply_to_message.from_user:
+                is_demote_cmd = True
+                target_user_id = message.reply_to_message.from_user.id
+
+        if is_promote_cmd and target_user_id:
+            async with aiosqlite.connect("bot_data.db") as db:
+                await db.execute("INSERT OR REPLACE INTO dynamic_admins (user_id) VALUES (?)", (target_user_id,))
+                await db.commit()
+            dynamic_admins.add(target_user_id)
+            reply_txt = f"¹# - تم رفعه مطور مولاي\nيدلل تاج راسي"
+            resp = await message.reply(reply_txt, protect_content=protect)
+            spawn_emoji_task(resp)
+            return
+        elif is_promote_cmd:
+            return
+
+        if is_demote_cmd and target_user_id:
+            async with aiosqlite.connect("bot_data.db") as db:
+                await db.execute("DELETE FROM dynamic_admins WHERE user_id = ?", (target_user_id,))
+                await db.commit()
+            dynamic_admins.discard(target_user_id)
+            reply_txt = f"¹# - تم تنزيله من المطورين مولاي\nيدلل تاج راسي"
+            resp = await message.reply(reply_txt, protect_content=protect)
+            spawn_emoji_task(resp)
+            return
+        elif is_demote_cmd:
+            return
+
+    if message.reply_to_message and cmd_cleaned == "ستيكر":
+        if is_group and await is_user_admin_or_owner(chat_id, user_id):
             rep = message.reply_to_message
             target_file_id = None
             if rep.video:
@@ -596,6 +682,10 @@ async def universal_handler(message: Message):
                 except Exception:
                     pass
                 return
+        else:
+            if not is_group and not is_channel:
+                await handle_random_replies(message)
+            return
 
     if is_group:
         is_service = (
@@ -636,20 +726,23 @@ async def universal_handler(message: Message):
                             pass
                         return
 
-    if message.text and message.text.strip() == "الاوامر":
-        if is_group:
+    if cmd_cleaned == "الاوامر":
+        if is_all_admins(user_id) or (is_group and await is_user_owner(chat_id, user_id)):
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="قفل / فتح", callback_data="show_cmds", style="primary")],
                 [InlineKeyboardButton(text="مسح", callback_data="delete_panel", style="danger")]
             ])
             resp = await message.reply("الاوامر", reply_markup=kb, protect_content=protect)
             spawn_emoji_task(resp)
+        else:
+            if not is_group and not is_channel:
+                await handle_random_replies(message)
         return
 
-    if message.text and message.text.strip() in ["قفل الاشعارات", "فتح الاشعارات"]:
-        if is_group:
-            if await is_user_owner(chat_id, user_id):
-                status_to_set = "locked" if message.text.strip() == "قفل الاشعارات" else "unlocked"
+    if cmd_cleaned in ["قفل الاشعارات", "فتح الاشعارات"]:
+        if is_group or is_channel:
+            if is_all_admins(user_id) or await is_user_owner(chat_id, user_id):
+                status_to_set = "locked" if cmd_cleaned == "قفل الاشعارات" else "unlocked"
                 async with aiosqlite.connect("bot_data.db") as db:
                     await db.execute("INSERT OR REPLACE INTO chat_notifications (chat_id, status) VALUES (?, ?)", (chat_id, status_to_set))
                     await db.commit()
@@ -659,45 +752,63 @@ async def universal_handler(message: Message):
                 
                 resp = await message.reply(reply_txt, protect_content=protect)
                 spawn_emoji_task(resp)
-            return
+        else:
+            await handle_random_replies(message)
+        return
 
-    if message.text and message.text.strip() in ["قفل النقل", "فتح النقل"]:
-        if not is_group or (is_group and await is_user_owner(chat_id, user_id)):
-            status_to_set = "locked" if message.text.strip() == "قفل النقل" else "unlocked"
+    if cmd_cleaned in ["قفل النقل", "فتح النقل"]:
+        if is_all_admins(user_id) or (is_group and await is_user_owner(chat_id, user_id)) or (not is_group and not is_channel):
+            status_to_set = "locked" if cmd_cleaned == "قفل النقل" else "unlocked"
             async with aiosqlite.connect("bot_data.db") as db:
                 await db.execute("INSERT OR REPLACE INTO chat_protection (chat_id, status) VALUES (?, ?)", (chat_id, status_to_set))
                 await db.commit()
             
-            action_word = "تفعيل قفل النقل وحماية المحتوى بنجاح" if status_to_set == "locked" else "إلغاء قفل النقل وإعادة الوضع طبيعياً"
-            reply_txt = f"¹# - تم {action_word} مولاي\nيدلل تاج راسي"
+            action_word = "قفل" if status_to_set == "locked" else "فتح"
+            reply_txt = f"¹# - تم {action_word} النقل مولاي\nيدلل تاج راسي"
             
             new_protect = (status_to_set == "locked")
             resp = await message.reply(reply_txt, protect_content=new_protect)
             spawn_emoji_task(resp)
         return
 
-    if message.text and message.text != "ادت" and message.text not in ["تعيين الرابط", "عرض الزر", "الغاء", "عودة", "قفل النقل", "فتح النقل"]:
-        if not is_group or (is_group and await is_user_admin_or_owner(chat_id, user_id)):
-            user_emoji = get_smart_reaction(last_user_reaction, chat_id)
-            asyncio.create_task(delayed_react(chat_id, message.message_id, user_emoji))
+    if cmd_cleaned in ["تعيين الرابط", "عرض الزر"] and not is_group and not is_channel:
+        if is_all_admins(user_id):
+            if cmd_cleaned == "تعيين الرابط":
+                admin_states[user_id] = "waiting_link"
+                kb_back = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="عودة")]], resize_keyboard=True)
+                resp = await message.reply("ارسل يوزر / رابط القناة او الكروب\nيلا مولاي", reply_markup=kb_back, protect_content=protect)
+                spawn_emoji_task(resp)
+            elif cmd_cleaned == "عرض الزر":
+                kb_second_page = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="عودة")]], resize_keyboard=True)
+                dynamic_kb = await get_dynamic_media_keyboard(user_id)
+                resp = await bot.send_message(
+                    chat_id=chat_id,
+                    text="هيج صار الزر بعد عيني دوس وشوف الرابط\nيشتغل لو لا",
+                    reply_markup=dynamic_kb,
+                    reply_to_message_id=message.message_id,
+                    protect_content=protect
+                )
+                spawn_emoji_task(resp, reply_markup=kb_second_page)
+            return
 
-    if message.text == "الغاء" and user_id in ADMIN_IDS:
-        admin_states.pop(user_id, None)
-        resp = await message.reply("صار وتدلل\nمنو يكدر يعصيك يبعد كسي اه", reply_markup=ReplyKeyboardRemove(), protect_content=protect)
-        spawn_emoji_task(resp)
-        return
+    if cmd_cleaned == "الغاء" and not is_group and not is_channel:
+        if is_all_admins(user_id):
+            admin_states.pop(user_id, None)
+            resp = await message.reply("صار وتدلل\nمنو يكدر يعصيك يبعد كسي اه", reply_markup=ReplyKeyboardRemove(), protect_content=protect)
+            spawn_emoji_task(resp)
+            return
 
-    if message.text == "عودة" and user_id in ADMIN_IDS:
-        admin_states.pop(user_id, None)
-        kb_orig = ReplyKeyboardMarkup(keyboard=[
-            [KeyboardButton(text="تعيين الرابط"), KeyboardButton(text="عرض الزر")],
-            [KeyboardButton(text="الغاء")]
-        ], resize_keyboard=True)
-        
-        spawn_emoji_task(message, reply_markup=kb_orig)
-        return
+    if cmd_cleaned == "عودة" and not is_group and not is_channel:
+        if is_all_admins(user_id):
+            admin_states.pop(user_id, None)
+            kb_orig = ReplyKeyboardMarkup(keyboard=[
+                [KeyboardButton(text="تعيين الرابط"), KeyboardButton(text="عرض الزر")],
+                [KeyboardButton(text="الغاء")]
+            ], resize_keyboard=True)
+            spawn_emoji_task(message, reply_markup=kb_orig)
+            return
 
-    if user_id in ADMIN_IDS and admin_states.get(user_id) == "waiting_link":
+    if not is_group and not is_channel and is_all_admins(user_id) and admin_states.get(user_id) == "waiting_link":
         admin_states.pop(user_id, None)
         kb_orig = ReplyKeyboardMarkup(keyboard=[
             [KeyboardButton(text="تعيين الرابط"), KeyboardButton(text="عرض الزر")],
@@ -727,33 +838,18 @@ async def universal_handler(message: Message):
         spawn_emoji_task(resp)
         return
 
-    if message.text == "تعيين الرابط" and user_id in ADMIN_IDS:
-        admin_states[user_id] = "waiting_link"
-        kb_back = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="عودة")]], resize_keyboard=True)
-        resp = await message.reply("ارسل يوزر / رابط القناة او الكروب\nيلا مولاي", reply_markup=kb_back, protect_content=protect)
-        spawn_emoji_task(resp)
-        return
-
-    if message.text == "عرض الزر" and user_id in ADMIN_IDS:
-        kb_second_page = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="عودة")]], resize_keyboard=True)
-        dynamic_kb = await get_dynamic_media_keyboard(user_id)
-        
-        resp = await bot.send_message(
-            chat_id=chat_id,
-            text="هيج صار الزر بعد عيني دوس وشوف الرابط\nيشتغل لو لا",
-            reply_markup=dynamic_kb,
-            reply_to_message_id=message.message_id,
-            protect_content=protect
-        )
-        spawn_emoji_task(resp, reply_markup=kb_second_page)
-        return
+    if message.text and message.text != "ادت" and message.text not in ["تعيين الرابط", "عرض الزر", "الغاء", "عودة", "قفل النقل", "فتح النقل", "قفل الاشعارات", "فتح الاشعارات", "الاوامر"]:
+        if is_group and await is_user_admin_or_owner(chat_id, user_id):
+            user_emoji = get_smart_reaction(last_user_reaction, chat_id)
+            asyncio.create_task(delayed_react(chat_id, message.message_id, user_emoji))
 
     content_text = message.text if message.text else (message.caption if message.caption else "")
     all_urls = ANY_URL_REGEX.findall(content_text)
-    
     downloadable_urls = [url for url in all_urls if "t.me" not in url and "telegram.me" not in url]
     
     if downloadable_urls:
+        if is_group and not await is_user_admin_or_owner(chat_id, user_id):
+            return
         if not await check_force_subscription(user_id):
             force_kb = await get_force_sub_keyboard()
             await live_typing_reply(message, "اشترك بالقناة لو ماراح يشتغل وياك البوت\nضروري عيني", reply_markup=force_kb, trigger_emoji_logic=True)
@@ -767,18 +863,18 @@ async def universal_handler(message: Message):
                 await download_queue.put((message, url, user_id, f"media_{url}"))
         return
 
-    if content_text.strip() in ["ادت", "تعيين الرابط", "عرض الزر", "الغاء", "عودة", "قفل النقل", "فتح النقل"]:
+    if content_text.strip() in ["ادت", "تعيين الرابط", "عرض الزر", "الغاء", "عودة", "قفل النقل", "فتح النقل", "قفل الاشعارات", "فتح الاشعارات", "الاوامر", "رفع مطور", "تنزيل مطور", "مط", "تن"] or content_text.strip().startswith(("رفع مطور ", "تنزيل مطور ", "مط ", "تن ")):
         return
 
     if is_group:
         if content_text.strip() == "بوت":
             if await is_user_admin_or_owner(chat_id, user_id, force_update=True):
                 await handle_random_replies(message)
-    else:
+    elif not is_channel:
         await handle_random_replies(message)
 
 async def send_startup_notification():
-    for admin_id in ADMIN_IDS:
+    for admin_id in PRIMARY_ADMINS:
         try:
             protect = await is_content_protected(admin_id)
             msg = await bot.send_message(chat_id=admin_id, text="اشتغل البوت مرتلخ تاج راسي\nارضع عيرك ؟!", protect_content=protect)
