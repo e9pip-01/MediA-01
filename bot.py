@@ -220,12 +220,10 @@ async def live_typing_reply(message: Message, full_text: str, reply_markup=None,
         words = line.split()
         chunks = []
         i = 0
-        toggle = True
         while i < len(words):
-            take = 3 if toggle else 2
+            take = 2
             chunks.append(" ".join(words[i:i+take]))
             i += take
-            toggle = not toggle
         chunked_lines.append(chunks)
     
     max_chunks = max(len(c) for c in chunked_lines) if chunked_lines else 0
@@ -434,7 +432,7 @@ async def handle_random_replies(message: Message):
         welcome_state = False
     else:
         kb_danger = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="رب العالمين", url="tg://user?id=8467593882", style="danger")]])
-        await live_typing_reply(message, "مو ناوي تستعملني عدل?! تريد اضوج\nترى ازعل واصيح المولاي يهينك", reply_markup=kb_danger, trigger_emoji_logic=True)
+        await live_typing_reply(message, "مو ناوي تستعملني وتشغلني مثل البوتات ؟!\nاضوج ترى ازعل واصيح المولاي يهينك", reply_markup=kb_danger, trigger_emoji_logic=True)
         welcome_state = True
 
 @dp.message(F.text == "ادت")
@@ -629,12 +627,14 @@ async def universal_handler(message: Message):
 
     if message.text == "الغاء" and user_id in ADMIN_IDS:
         admin_states.pop(user_id, None)
-        resp = await message.reply("صار وتدلل\nمنو يكدر يعصيك يبعد كسي اه", reply_markup=ReplyKeyboardRemove())
+        kb_orig = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="تعيين رابط زر الاشتراك"), KeyboardButton(text="عرض الزر")]], resize_keyboard=True)
+        resp = await message.reply("صار وتدلل\nمنو يكدر يعصيك يبعد كسي اه", reply_markup=kb_orig)
         spawn_emoji_task(resp)
         return
 
     if user_id in ADMIN_IDS and admin_states.get(user_id) == "waiting_link":
         admin_states.pop(user_id, None)
+        kb_orig = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="تعيين رابط زر الاشتراك"), KeyboardButton(text="عرض الزر")]], resize_keyboard=True)
         if message.text:
             text_val = message.text.strip()
             pure_username = text_val
@@ -651,11 +651,11 @@ async def universal_handler(message: Message):
                 await set_setting("sub_link", clean_url)
                 await set_setting("btn_text", "اشترك بالقناة")
                 await set_setting("btn_style", "primary")
-                resp = await message.reply("تم تعيين زر الاشتراك العلني مثل ماردت\nسمعا وطاعة العيرك", reply_markup=ReplyKeyboardRemove())
+                resp = await message.reply("تم تعيين زر الاشتراك العلني مثل ماردت\nسمعا وطاعة العيرك", reply_markup=kb_orig)
             else:
-                resp = await message.reply("اهو ليش تمضرط وياي مو راح اضوج\nلاتعيدها مولاي", reply_markup=ReplyKeyboardRemove())
+                resp = await message.reply("اهو ليش تمضرط وياي مو راح اضوج\nلاتعيدها مولاي", reply_markup=kb_orig)
         else:
-            resp = await message.reply("اهو ليش تمضرط وياي مو راح اضوج\nلاتعيدها مولاي", reply_markup=ReplyKeyboardRemove())
+            resp = await message.reply("اهو ليش تمضرط وياي مو راح اضوج\nلاتعيدها مولاي", reply_markup=kb_orig)
         spawn_emoji_task(resp)
         return
 
@@ -668,7 +668,9 @@ async def universal_handler(message: Message):
 
     if message.text == "عرض الزر" and user_id in ADMIN_IDS:
         sub_kb = await get_sub_keyboard()
+        kb_cancel = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="الغاء")]], resize_keyboard=True)
         resp = await message.reply("هيج صار الزر بعد عيني دوس وشوف الرابط\nيشتغل لو لا", reply_markup=sub_kb)
+        await bot.send_message(chat_id=chat_id, text="اضغط 'الغاء' للعودة للقائمة الرئيسية ↩️", reply_markup=kb_cancel)
         spawn_emoji_task(resp)
         return
 
