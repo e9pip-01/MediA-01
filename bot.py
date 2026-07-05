@@ -493,7 +493,7 @@ async def admin_cmd(message: Message):
             [KeyboardButton(text="تعيين الرابط"), KeyboardButton(text="عرض الزر")],
             [KeyboardButton(text="الغاء")]
         ], resize_keyboard=True)
-        resp = await message.reply("تريد تغير اسم الزر دوس تغيير اسم الزر\nتريد تعين رابط الزر دوس تعيين الرابط", reply_markup=kb)
+        resp = await message.reply("تريد عرض رابط الزر دوس عرض الزر\nتريد تعين رابط الزر دوس تعيين الرابط", reply_markup=kb)
         spawn_emoji_task(resp)
     else:
         is_group = message.chat.type in ["group", "supergroup"]
@@ -505,12 +505,7 @@ async def show_commands_callback(callback: CallbackQuery):
     chat_id = callback.message.chat.id
     user_id = callback.from_user.id
     creator_id = int(callback.data.split(":")[1])
-    is_group = callback.message.chat.type in ["group", "supergroup"]
     
-    if not is_group:
-        await callback.answer(cache_time=0)
-        return
-
     if user_id != creator_id:
         await callback.answer("شكد طفل وشكد منيوج نعلعلا ابوك\nونعلعلا نيج امك ياسكط", show_alert=True)
         return
@@ -535,12 +530,7 @@ async def back_main_callback(callback: CallbackQuery):
     chat_id = callback.message.chat.id
     user_id = callback.from_user.id
     creator_id = int(callback.data.split(":")[1])
-    is_group = callback.message.chat.type in ["group", "supergroup"]
     
-    if not is_group:
-        await callback.answer(cache_time=0)
-        return
-
     if user_id != creator_id:
         await callback.answer("شكد طفل وشكد منيوج نعلعلا ابوك\nونعلعلا نيج امك ياسكط", show_alert=True)
         return
@@ -560,12 +550,7 @@ async def delete_panel_callback(callback: CallbackQuery):
     chat_id = callback.message.chat.id
     user_id = callback.from_user.id
     creator_id = int(callback.data.split(":")[1])
-    is_group = callback.message.chat.type in ["group", "supergroup"]
     
-    if not is_group:
-        await callback.answer(cache_time=0)
-        return
-
     if user_id != creator_id:
         await callback.answer("شكد طفل وشكد منيوج نعلعلا ابوك\nونعلعلا نيج امك ياسكط", show_alert=True)
         return
@@ -732,7 +717,7 @@ async def universal_handler(message: Message):
                         return
 
     if cmd_cleaned == "الاوامر":
-        if is_all_admins(user_id) or (is_group and await is_user_owner(chat_id, user_id)):
+        if is_all_admins(user_id) or (is_group and await is_user_owner(chat_id, user_id)) or (not is_group and not is_channel):
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="قفل / فتح", callback_data=f"show_cmds:{user_id}", style="primary")],
                 [InlineKeyboardButton(text="مسح", callback_data=f"delete_panel:{user_id}", style="danger")]
