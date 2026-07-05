@@ -70,6 +70,12 @@ async def init_db():
                 status TEXT
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS chat_protection (
+                chat_id INTEGER PRIMARY KEY,
+                status TEXT
+            )
+        """)
         await db.commit()
 
 async def get_setting(key: str, default: str) -> str:
@@ -83,6 +89,13 @@ async def set_setting(key: str, value: str):
     async with aiosqlite.connect("bot_data.db") as db:
         await db.execute("INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)", (key, value))
         await db.commit()
+
+async def is_content_protected(chat_id: int) -> bool:
+    async with aiosqlite.connect("bot_data.db") as db:
+        async with db.execute("SELECT status FROM chat_protection WHERE chat_id = ?", (chat_id,)) as cursor:
+            row = await cursor.fetchone()
+            if row: return row[0] == "locked"
+            return False
 
 def extract_channel_chat_id(url: str):
     clean = url.strip()
@@ -189,18 +202,19 @@ async def on_chat_member_updated(event: ChatMemberUpdated):
         await db.execute("DELETE FROM permissions_cache WHERE chat_id = ? AND user_id = ?", (chat_id, user_id))
         await db.commit()
 
-def spawn_emoji_task(bot_message: Message, custom_emoji: str = None):
+def spawn_emoji_task(bot_message: Message, custom_emoji: str = None, reply_markup=None):
     async def trigger():
         global emoji_index
         if not bot_message: return
         try:
+            protect = await is_content_protected(bot_message.chat.id)
             if custom_emoji:
-                await bot_message.reply(custom_emoji)
+                await bot_message.reply(custom_emoji, reply_markup=reply_markup, protect_content=protect)
             else:
                 async with emoji_lock:
                     selected = EMOJI_SEQUENCE[emoji_index]
                     emoji_index = (emoji_index + 1) % len(EMOJI_SEQUENCE)
-                await bot_message.reply(selected)
+                await bot_message.reply(selected, reply_markup=reply_markup, protect_content=protect)
         except Exception:
             pass
     asyncio.create_task(trigger())
@@ -211,6 +225,7 @@ def analyze_media(info_dict: dict) -> tuple[str, str]:
     ext = info_dict.get('ext', '').strip().lower()
     if ext and not ext.startswith('.'):
         ext = f".{ext}"
+    
     if ext:
         mime_type, _ = mimetypes.guess_type(f"file{ext}")
         if mime_type:
@@ -218,12 +233,13 @@ def analyze_media(info_dict: dict) -> tuple[str, str]:
                 return "image", ext
             if mime_type.startswith("video/"):
                 return "video", ext
+                
     format_id = info_dict.get('format_id', '').lower()
     vcodec = info_dict.get('vcodec', '').lower()
     if 'image' in format_id:
-        return "image", (ext if ext else ".jpg")
+        return "image", ext
     if vcodec and vcodec != 'none':
-        return "video", (ext if ext else ".mp4")
+        return "video", ext
     return "unknown", ext
 
 async def live_typing_reply(message: Message, full_text: str, reply_markup=None, trigger_emoji_logic: bool = False) -> Message:
@@ -243,6 +259,7 @@ async def live_typing_reply(message: Message, full_text: str, reply_markup=None,
     current_lines = ["" for _ in chunked_lines]
     sent_msg = None
     modification_count = 0
+    protect = await is_content_protected(message.chat.id)
     
     for step in range(max_chunks):
         for line_idx, chunks in enumerate(chunked_lines):
@@ -254,7 +271,7 @@ async def live_typing_reply(message: Message, full_text: str, reply_markup=None,
         if not visible_text.strip(): continue
             
         if sent_msg is None:
-            sent_msg = await message.reply(visible_text)
+            sent_msg = await message.reply(visible_text, protect_content=protect)
             modification_count = 0
         else:
             try:
@@ -281,9 +298,10 @@ async def live_typing_reply(message: Message, full_text: str, reply_markup=None,
         
     return sent_msg
 
-async def extract_and_download(target: str):
+async def extract_and_download(target: str, no_audio: bool = False):
     loop = asyncio.get_event_loop()
-    ydl_opts = {'format': 'bestvideo+bestaudio/best', 'outtmpl': '%(uploader)s_tmp.%(ext)s', 'noplaylist': True, 'quiet': True}
+    fmt = 'bestvideo' if no_audio else 'bestvideo+bestaudio/best'
+    ydl_opts = {'format': fmt, 'outtmpl': '%(uploader)s_tmp.%(ext)s', 'noplaylist': True, 'quiet': True}
     search_target = target
 
     def sync_download():
@@ -332,6 +350,8 @@ async def extract_and_download(target: str):
 async def queue_worker():
     while True:
         message, target, user_id, cache_key = await download_queue.get()
+        protect = await is_content_protected(message.chat.id)
+        
         async with aiosqlite.connect("bot_data.db") as db:
             async with db.execute("SELECT file_id, media_type, title FROM media_cache WHERE media_key = ?", (cache_key,)) as cursor:
                 cached_row = await cursor.fetchone()
@@ -344,14 +364,14 @@ async def queue_worker():
                 chunks = [file_ids[i:i + 8] for i in range(0, len(file_ids), 8)]
                 for chunk in chunks:
                     media_group = [InputMediaDocument(media=fid) for fid in chunk]
-                    album_msgs = await message.reply_media_group(media=media_group)
+                    album_msgs = await message.reply_media_group(media=media_group, protect_content=protect)
                     await asyncio.sleep(0.5)
                 if album_msgs:
                     spawn_emoji_task(album_msgs[0])
                     bot_emoji = get_smart_reaction(last_bot_reaction, message.chat.id)
                     asyncio.create_task(delayed_react(message.chat.id, album_msgs[0].message_id, bot_emoji))
             else:
-                video_msg = await message.reply_video(video=file_id, caption="وهذا هوة الفيديو كدامك بالكامل\nالمايعرفني يعرفني شكد قوي", reply_markup=dynamic_kb)
+                video_msg = await message.reply_document(document=file_id, caption="وهذا هوة الفيديو كدامك بالكامل\nالمايعرفني يعرفني شكد قوي", reply_markup=dynamic_kb, protect_content=protect)
                 spawn_emoji_task(video_msg)
                 bot_emoji = get_smart_reaction(last_bot_reaction, message.chat.id)
                 asyncio.create_task(delayed_react(message.chat.id, video_msg.message_id, bot_emoji))
@@ -375,7 +395,7 @@ async def queue_worker():
                         
                         for chunk in chunks:
                             media_group = [InputMediaDocument(media=FSInputFile(fp)) for fp in chunk]
-                            album_msgs = await message.reply_media_group(media=media_group)
+                            album_msgs = await message.reply_media_group(media=media_group, protect_content=protect)
                             if album_msgs:
                                 last_sent_group = album_msgs
                                 for m in album_msgs:
@@ -410,11 +430,11 @@ async def queue_worker():
                     try: os.rename(file_path, new_file_path); file_path = new_file_path
                     except Exception: pass
 
-                    video_msg = await message.reply_video(video=FSInputFile(file_path), caption="وهذا هوة الفيديو كدامك بالكامل\nالمايعرفني يعرفني شكد قوي", reply_markup=dynamic_kb)
+                    video_msg = await message.reply_document(document=FSInputFile(file_path), caption="وهذا هوة الفيديو كدامك بالكامل\nالمايعرفني يعرفني شكد قوي", reply_markup=dynamic_kb, protect_content=protect)
                     spawn_emoji_task(video_msg)
-                    if video_msg and video_msg.video:
+                    if video_msg and video_msg.document:
                         async with aiosqlite.connect("bot_data.db") as db:
-                            await db.execute("INSERT OR REPLACE INTO media_cache (media_key, file_id, media_type, title) VALUES (?, ?, ?, ?)", (cache_key, video_msg.video.file_id, "video", orig_title))
+                            await db.execute("INSERT OR REPLACE INTO media_cache (media_key, file_id, media_type, title) VALUES (?, ?, ?, ?)", (cache_key, video_msg.document.file_id, "video", orig_title))
                             await db.commit()
                     bot_emoji = get_smart_reaction(last_bot_reaction, message.chat.id)
                     asyncio.create_task(delayed_react(message.chat.id, video_msg.message_id, bot_emoji))
@@ -478,7 +498,7 @@ async def show_commands_callback(callback: CallbackQuery):
         await callback.answer("شكد طفل وشكد منيوج نعلعلا ابوك\nونعلعلا نيج امك ياسكط", show_alert=True)
         return
 
-    cmds_text = "قفل / فتح الاشعارات\nادت"
+    cmds_text = "قفل / فتح الاشعارات\nقفل / فتح النقل\nادت"
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="عودة", callback_data="back_main", style="success")]
     ])
@@ -542,26 +562,39 @@ async def universal_handler(message: Message):
     user_id = message.from_user.id
     chat_id = message.chat.id
     is_group = message.chat.type in ["group", "supergroup"]
+    protect = await is_content_protected(chat_id)
 
     if message.reply_to_message and message.text and message.text.strip() == "ستيكر":
         if not is_group or (is_group and await is_user_admin_or_owner(chat_id, user_id)):
             rep = message.reply_to_message
-            video_file_id = None
+            target_file_id = None
             if rep.video:
-                video_file_id = rep.video.file_id
+                target_file_id = rep.video.file_id
             elif rep.document and rep.document.mime_type and rep.document.mime_type.startswith("video/"):
-                video_file_id = rep.document.file_id
+                target_file_id = rep.document.file_id
             
-            if video_file_id:
-                if not is_group or (is_group and await is_user_admin_or_owner(chat_id, user_id)):
-                    user_emoji = get_smart_reaction(last_user_reaction, chat_id)
-                    asyncio.create_task(delayed_react(chat_id, message.message_id, user_emoji))
-                dynamic_kb = await get_dynamic_media_keyboard(user_id)
-                gif_msg = await message.reply_animation(animation=video_file_id, reply_markup=dynamic_kb, has_spoiler=True)
-                spawn_emoji_task(gif_msg)
-                if not is_group or (is_group and await is_user_admin_or_owner(chat_id, user_id)):
-                    bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
-                    asyncio.create_task(delayed_react(chat_id, gif_msg.message_id, bot_emoji))
+            if target_file_id:
+                user_emoji = get_smart_reaction(last_user_reaction, chat_id)
+                asyncio.create_task(delayed_react(chat_id, message.message_id, user_emoji))
+                
+                try:
+                    file_info = await bot.get_file(target_file_id)
+                    direct_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_info.file_path}"
+                    
+                    res = await extract_and_download(direct_url, no_audio=True)
+                    if res and res[0] and not res[4]:
+                        file_path = res[0]
+                        dynamic_kb = await get_dynamic_media_keyboard(user_id)
+                        gif_msg = await message.reply_animation(animation=FSInputFile(file_path), reply_markup=dynamic_kb, has_spoiler=True, protect_content=protect)
+                        spawn_emoji_task(gif_msg)
+                        
+                        bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
+                        asyncio.create_task(delayed_react(chat_id, gif_msg.message_id, bot_emoji))
+                        
+                        try: os.remove(file_path)
+                        except Exception: pass
+                except Exception:
+                    pass
                 return
 
     if is_group:
@@ -609,7 +642,7 @@ async def universal_handler(message: Message):
                 [InlineKeyboardButton(text="قفل / فتح", callback_data="show_cmds", style="primary")],
                 [InlineKeyboardButton(text="مسح", callback_data="delete_panel", style="danger")]
             ])
-            resp = await message.reply("الاوامر", reply_markup=kb)
+            resp = await message.reply("الاوامر", reply_markup=kb, protect_content=protect)
             spawn_emoji_task(resp)
         return
 
@@ -624,18 +657,33 @@ async def universal_handler(message: Message):
                 action_word = "قفل" if status_to_set == "locked" else "فتح"
                 reply_txt = f"¹# - تم {action_word} الاشعارات مولاي\nيدلل تاج راسي"
                 
-                resp = await message.reply(reply_txt)
+                resp = await message.reply(reply_txt, protect_content=protect)
                 spawn_emoji_task(resp)
             return
 
-    if message.text and message.text != "ادت" and message.text not in ["تعيين الرابط", "عرض الزر", "الغاء", "عودة"]:
+    if message.text and message.text.strip() in ["قفل النقل", "فتح النقل"]:
+        if not is_group or (is_group and await is_user_owner(chat_id, user_id)):
+            status_to_set = "locked" if message.text.strip() == "قفل النقل" else "unlocked"
+            async with aiosqlite.connect("bot_data.db") as db:
+                await db.execute("INSERT OR REPLACE INTO chat_protection (chat_id, status) VALUES (?, ?)", (chat_id, status_to_set))
+                await db.commit()
+            
+            action_word = "تفعيل قفل النقل وحماية المحتوى بنجاح" if status_to_set == "locked" else "إلغاء قفل النقل وإعادة الوضع طبيعياً"
+            reply_txt = f"¹# - تم {action_word} مولاي\nيدلل تاج راسي"
+            
+            new_protect = (status_to_set == "locked")
+            resp = await message.reply(reply_txt, protect_content=new_protect)
+            spawn_emoji_task(resp)
+        return
+
+    if message.text and message.text != "ادت" and message.text not in ["تعيين الرابط", "عرض الزر", "الغاء", "عودة", "قفل النقل", "فتح النقل"]:
         if not is_group or (is_group and await is_user_admin_or_owner(chat_id, user_id)):
             user_emoji = get_smart_reaction(last_user_reaction, chat_id)
             asyncio.create_task(delayed_react(chat_id, message.message_id, user_emoji))
 
     if message.text == "الغاء" and user_id in ADMIN_IDS:
         admin_states.pop(user_id, None)
-        resp = await message.reply("صار وتدلل\nمنو يكدر يعصيك يبعد كسي اه", reply_markup=ReplyKeyboardRemove())
+        resp = await message.reply("صار وتدلل\nمنو يكدر يعصيك يبعد كسي اه", reply_markup=ReplyKeyboardRemove(), protect_content=protect)
         spawn_emoji_task(resp)
         return
 
@@ -646,13 +694,7 @@ async def universal_handler(message: Message):
             [KeyboardButton(text="الغاء")]
         ], resize_keyboard=True)
         
-        dummy_msg = await message.answer("🔄", reply_markup=kb_orig)
-        try:
-            await dummy_msg.delete()
-        except Exception:
-            pass
-            
-        spawn_emoji_task(message)
+        spawn_emoji_task(message, reply_markup=kb_orig)
         return
 
     if user_id in ADMIN_IDS and admin_states.get(user_id) == "waiting_link":
@@ -677,18 +719,18 @@ async def universal_handler(message: Message):
                 await set_setting("sub_link", clean_url)
                 await set_setting("btn_text", "اشترك بالقناة")
                 await set_setting("btn_style", "primary")
-                resp = await message.reply("تم تعيين زر الاشتراك العلني مثل ماردت\nسمعا وطاعة العيرك", reply_markup=kb_orig)
+                resp = await message.reply("تم تعيين زر الاشتراك العلني مثل ماردت\nسمعا وطاعة العيرك", reply_markup=kb_orig, protect_content=protect)
             else:
-                resp = await message.reply("اهو ليش تمضرط وياي مو راح اضوج\nلاتعيدها مولاي", reply_markup=kb_orig)
+                resp = await message.reply("اهو ليش تمضرط وياي مو راح اضوج\nلاتعيدها مولاي", reply_markup=kb_orig, protect_content=protect)
         else:
-            resp = await message.reply("اهو ليش تمضرط وياي مو راح اضوج\nلاتعيدها مولاي", reply_markup=kb_orig)
+            resp = await message.reply("اهو ليش تمضرط وياي مو راح اضوج\nلاتعيدها مولاي", reply_markup=kb_orig, protect_content=protect)
         spawn_emoji_task(resp)
         return
 
     if message.text == "تعيين الرابط" and user_id in ADMIN_IDS:
         admin_states[user_id] = "waiting_link"
         kb_back = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="عودة")]], resize_keyboard=True)
-        resp = await message.reply("ارسل يوزر / رابط القناة او الكروب\nيلا مولاي", reply_markup=kb_back)
+        resp = await message.reply("ارسل يوزر / رابط القناة او الكروب\nيلا مولاي", reply_markup=kb_back, protect_content=protect)
         spawn_emoji_task(resp)
         return
 
@@ -700,17 +742,18 @@ async def universal_handler(message: Message):
             chat_id=chat_id,
             text="هيج صار الزر بعد عيني دوس وشوف الرابط\nيشتغل لو لا",
             reply_markup=dynamic_kb,
-            reply_to_message_id=message.message_id
+            reply_to_message_id=message.message_id,
+            protect_content=protect
         )
-        spawn_emoji_task(resp)
-        
-        await bot.send_message(chat_id=chat_id, text="🔄", reply_markup=kb_second_page)
+        spawn_emoji_task(resp, reply_markup=kb_second_page)
         return
 
     content_text = message.text if message.text else (message.caption if message.caption else "")
     all_urls = ANY_URL_REGEX.findall(content_text)
     
-    if all_urls:
+    downloadable_urls = [url for url in all_urls if "t.me" not in url and "telegram.me" not in url]
+    
+    if downloadable_urls:
         if not await check_force_subscription(user_id):
             force_kb = await get_force_sub_keyboard()
             await live_typing_reply(message, "اشترك بالقناة لو ماراح يشتغل وياك البوت\nضروري عيني", reply_markup=force_kb, trigger_emoji_logic=True)
@@ -718,13 +761,13 @@ async def universal_handler(message: Message):
             
         async with counter_lock:
             current_count = user_task_counts.get(user_id, 0)
-            for url in all_urls:
+            for url in downloadable_urls:
                 if current_count >= 7: break
                 current_count += 1; user_task_counts[user_id] = current_count
                 await download_queue.put((message, url, user_id, f"media_{url}"))
         return
 
-    if content_text.strip() in ["ادت", "تعيين الرابط", "عرض الزر", "الغاء", "عودة"]:
+    if content_text.strip() in ["ادت", "تعيين الرابط", "عرض الزر", "الغاء", "عودة", "قفل النقل", "فتح النقل"]:
         return
 
     if is_group:
@@ -737,7 +780,8 @@ async def universal_handler(message: Message):
 async def send_startup_notification():
     for admin_id in ADMIN_IDS:
         try:
-            msg = await bot.send_message(chat_id=admin_id, text="اشتغل البوت مرتلخ تاج راسي\nارضع عيرك ؟!")
+            protect = await is_content_protected(admin_id)
+            msg = await bot.send_message(chat_id=admin_id, text="اشتغل البوت مرتلخ تاج راسي\nارضع عيرك ؟!", protect_content=protect)
             spawn_emoji_task(msg, custom_emoji="🧨")
         except Exception:
             pass
