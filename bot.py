@@ -133,7 +133,6 @@ async def is_custom_link_set() -> bool:
     return sub_link != DEFAULT_SUBSCRIBE_LINK
 
 async def check_force_subscription(user_id: int) -> bool:
-    if is_all_admins(user_id): return True
     sub_link = await get_setting("sub_link", DEFAULT_SUBSCRIBE_LINK)
     if sub_link == DEFAULT_SUBSCRIBE_LINK: return True
     target_chat = extract_channel_chat_id(sub_link)
@@ -143,13 +142,6 @@ async def check_force_subscription(user_id: int) -> bool:
         return member.status in ["member", "administrator", "creator"]
     except Exception:
         return True
-
-def get_clean_url(input_str: str) -> str:
-    input_str = input_str.strip()
-    if input_str.startswith("@"): return f"https://t.me/{input_str[1:]}"
-    if input_str.startswith("http://") or input_str.startswith("https://"): return input_str
-    if input_str.startswith("t.me/"): return f"https://{input_str}"
-    return f"https://t.me/{input_str}"
 
 async def get_dynamic_media_keyboard(user_id: int) -> InlineKeyboardMarkup:
     has_custom = await is_custom_link_set()
@@ -161,7 +153,7 @@ async def get_dynamic_media_keyboard(user_id: int) -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="تواصل مع المطور", url=DEFAULT_SUBSCRIBE_LINK, style="success")]])
     else:
         sub_link = await get_setting("sub_link", DEFAULT_SUBSCRIBE_LINK)
-        return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="اشترك بالقناة", url=sub_link, style="primary")]])
+        return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="اشترك بالقناة", url=sub_link, style="success")]])
 
 async def get_sub_keyboard() -> InlineKeyboardMarkup:
     btn_text = await get_setting("btn_text", DEFAULT_BUTTON_TEXT)
@@ -171,7 +163,14 @@ async def get_sub_keyboard() -> InlineKeyboardMarkup:
 
 async def get_force_sub_keyboard() -> InlineKeyboardMarkup:
     sub_link = await get_setting("sub_link", DEFAULT_SUBSCRIBE_LINK)
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="اشترك بالقناة", url=sub_link, style="primary")]])
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="اشترك بالقناة", url=sub_link, style="success")]])
+
+def get_clean_url(input_str: str) -> str:
+    input_str = input_str.strip()
+    if input_str.startswith("@"): return f"https://t.me/{input_str[1:]}"
+    if input_str.startswith("http://") or input_str.startswith("https://"): return input_str
+    if input_str.startswith("t.me/"): return f"https://{input_str}"
+    return f"https://t.me/{input_str}"
 
 def get_smart_reaction(last_reaction_dict, key: int) -> str:
     last = last_reaction_dict.get(key)
@@ -539,16 +538,16 @@ async def show_commands_callback(callback: CallbackQuery):
         return
 
     cmds_text = (
-        "`قفل` / `النقل` \n"
-        "`فتح` / `الاشعارات` \n"
-        "`رفع` `تنزيل مطور` \n"
-        "`مط` `تن` / بالرد او بالايدي"
+        "قفل / النقل \n"
+        "فتح / الاشعارات \n"
+        "رفع تنزيل مطور \n"
+        "مط تن / بالرد او بالايدي"
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="عودة", callback_data=f"back_main:{creator_id}", style="success")]
     ])
     try:
-        await callback.message.edit_text(text=cmds_text, reply_markup=kb, parse_mode="MarkdownV2")
+        await callback.message.edit_text(text=cmds_text, reply_markup=kb)
     except Exception:
         pass
     await callback.answer(cache_time=0)
@@ -563,14 +562,14 @@ async def info_cmds_callback(callback: CallbackQuery):
         return
 
     cmds_text = (
-        "`عرض المطورين`\n"
-        "`عرض مستعملين البوت`"
+        "عرض المطورين\n"
+        "عرض مستعملين البوت"
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="عودة", callback_data=f"back_main:{creator_id}", style="success")]
     ])
     try:
-        await callback.message.edit_text(text=cmds_text, reply_markup=kb, parse_mode="MarkdownV2")
+        await callback.message.edit_text(text=cmds_text, reply_markup=kb)
     except Exception:
         pass
     await callback.answer(cache_time=0)
@@ -589,7 +588,7 @@ async def back_main_callback(callback: CallbackQuery):
         [InlineKeyboardButton(text="مسح", callback_data=f"delete_panel:{creator_id}", style="danger")]
     ])
     try:
-        await callback.message.edit_text(text="||الاوامر والتعليمات||", reply_markup=kb, parse_mode="MarkdownV2")
+        await callback.message.edit_text(text="الاوامر والتعليمات", reply_markup=kb)
     except Exception:
         pass
     await callback.answer(cache_time=0)
@@ -621,7 +620,7 @@ async def universal_handler(message: Message):
     cmd_cleaned = message.text.strip() if message.text else ""
 
     if message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_bot:
-        if cmd_cleaned in ["رفع مطور", "مط", "تنزيل مطور", "تن", "ستيكر"] or cmd_cleaned.startswith(("رفع مطور ", "مط ", "تنزيل مطور ", "تن ")):
+        if cmd_cleaned in ["رفع مطور", "مط", "تنزيل مطور", "تن"] or cmd_cleaned.startswith(("رفع مطور ", "مط ", "تنزيل مطور ", "تن ")):
             resp = await message.reply("¹# -  لايمكنك استعمال الاوامر\nعلى البوتات", protect_content=protect)
             spawn_emoji_task(resp, trigger_by_user_id=user_id)
             return
@@ -710,23 +709,23 @@ async def universal_handler(message: Message):
             try:
                 chat_info = await bot.get_chat(dev_id)
                 if chat_info.username:
-                    username_str = f"||@{chat_info.username}||"
+                    username_str = f"@{chat_info.username}"
             except Exception:
                 pass
-            lines.append(f"[{dev_id}](tg://user?id={dev_id}) \\- ¹#\n{username_str}")
+            lines.append(f"({dev_id}) - ¹#\n{username_str}")
             
         for dev_id in dynamic_admins:
             username_str = ""
             try:
                 chat_info = await bot.get_chat(dev_id)
                 if chat_info.username:
-                    username_str = f"||@{chat_info.username}||"
+                    username_str = f"@{chat_info.username}"
             except Exception:
                 pass
-            lines.append(f"[{dev_id}](tg://user?id={dev_id}) \\- ¹#\n{username_str}")
+            lines.append(f"({dev_id}) - ¹#\n{username_str}")
             
         final_text = "\n\n".join(lines)
-        await live_typing_reply(message, final_text, parse_mode="MarkdownV2", trigger_emoji_logic=True)
+        await live_typing_reply(message, final_text, trigger_emoji_logic=True)
         return
 
     if is_all_admins(user_id) and cmd_cleaned == "عرض مستعملين البوت":
@@ -743,7 +742,7 @@ async def universal_handler(message: Message):
             collected_users.discard(uid)
             
         if not collected_users:
-            await live_typing_reply(message, "لا يوجد مستخدمين مسجلين حالياً\\.", parse_mode="MarkdownV2", trigger_emoji_logic=True)
+            await live_typing_reply(message, "لا يوجد مستخدمين مسجلين حالياً.", trigger_emoji_logic=True)
             return
             
         lines = []
@@ -752,13 +751,13 @@ async def universal_handler(message: Message):
             try:
                 chat_info = await bot.get_chat(usr_id)
                 if chat_info.username:
-                    username_str = f"||@{chat_info.username}||"
+                    username_str = f"@{chat_info.username}"
             except Exception:
                 pass
-            lines.append(f"[{usr_id}](tg://user?id={usr_id}) \\- ¹#\n{username_str}")
+            lines.append(f"({usr_id}) - ¹#\n{username_str}")
             
         final_text = "\n\n".join(lines)
-        await live_typing_reply(message, final_text, parse_mode="MarkdownV2", trigger_emoji_logic=True)
+        await live_typing_reply(message, final_text, trigger_emoji_logic=True)
         return
 
     if message.reply_to_message and cmd_cleaned == "ستيكر":
@@ -843,7 +842,7 @@ async def universal_handler(message: Message):
                 [InlineKeyboardButton(text="قفل / فتح", callback_data=f"show_cmds:{user_id}", style="primary"), InlineKeyboardButton(text="عرض المعلومات", callback_data=f"info_cmds:{user_id}", style="primary")],
                 [InlineKeyboardButton(text="مسح", callback_data=f"delete_panel:{user_id}", style="danger")]
             ])
-            resp = await message.reply("||الاوامر والتعليمات||", reply_markup=kb, protect_content=protect, parse_mode="MarkdownV2")
+            resp = await message.reply("الاوامر والتعليمات", reply_markup=kb, protect_content=protect)
             spawn_emoji_task(resp, trigger_by_user_id=user_id)
         else:
             if not is_group and not is_channel:
@@ -940,7 +939,7 @@ async def universal_handler(message: Message):
                 clean_url = get_clean_url(text_val)
                 await set_setting("sub_link", clean_url)
                 await set_setting("btn_text", "اشترك بالقناة")
-                await set_setting("btn_style", "primary")
+                await set_setting("btn_style", "success")
                 resp = await message.reply("تم تعيين زر الاشتراك العلني مثل ماردت\nسمعا وطاعة العيرك", reply_markup=kb_orig, protect_content=protect)
             else:
                 resp = await message.reply("اهو ليش تمضرط وياي مو راح اضوج\nلاتعيدها مولاي", reply_markup=kb_orig, protect_content=protect)
@@ -966,6 +965,7 @@ async def universal_handler(message: Message):
     if downloadable_urls:
         if is_group and not await is_user_admin_or_owner(chat_id, user_id):
             return
+        
         if not await check_force_subscription(user_id):
             force_kb = await get_force_sub_keyboard()
             await live_typing_reply(message, "اشترك بالقناة لو ماراح يشتغل وياك البوت\nضروري عيني", reply_markup=force_kb, trigger_emoji_logic=True)
