@@ -5,30 +5,8 @@ import random
 import aiosqlite
 import time
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, ReactionTypeEmoji
+from aiogram.types import Message, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 import yt_dlp
-
-class BotMessages:
-    RESP_1 = "اهلين وياك بوت MUsic تريد اشتغل\nدز لو رابط لو يوت وكول عنوان اغنيتك"
-    RESP_2 = "مو ناوي تستعملني عدل?! تريد اضوج\nترى ازعل واصيح المولاي يهينك"
-    
-    PROCESSING_AUDIO = "يتم العثور والبدء ب استكشاف طلبك\nسيتم تنفيذه الان"
-    PROCESSING_VIDEO = "يتم العثور والبدء ب استكشاف طلبك\nسيتم ارسال الفيديو الان"
-    
-    NOT_FOUND = "الرابط غير مدعوم او العنوان لم يتم العثور\nعليه عزيزي"
-    SUCCESS_AUDIO = "وهايهية اغنيتك تاج راسي شتريد بعد\nتدلل بعدقلبي"
-    SUCCESS_VIDEO = "وهذا هوة الفيديو كدامك بالكامل\nالمايعرفني يعرفني شكد قوي"
-    
-    ADMIN_MENU = "تريد تغير اسم الزر دوس تغيير اسم الزر\nتريد تعين رابط الزر دوس تعيين الرابط"
-    ASK_LINK = "ارسل يوزر / رابط القناة او الكروب\nيلا مولاي"
-    BAD_LINK = "اهو لاتمضرط وياي مو راح اضوج\nهوف منك مولاي"
-    SET_SUCCESS = "تم تعيين زر الاشتراك العلني مثل ماردت\nسمعا وطاعة العيرك"
-    PREVIEW_MSG = "هيج صار الزر بعد عيني دوس وشوف الرابط\nيشتغل لو لا"
-    CANCEL_MSG = "صار وتدلل\nمنو يكدر يعصيك يبعد كسي اه"
-    
-    FORCE_SUB = "اشترك بالقناة لو ماراح يشتغل وياك البوت\nضروري عيني"
-    
-    STARTUP_MSG = "اشتغل البوت مرتلخ تاج راسي\nارضع عيرك ؟!"
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 bot = Bot(token=BOT_TOKEN)
@@ -45,6 +23,7 @@ admin_states = {}
 ADMIN_IDS = [8597653867, 8467593882]
 DEFAULT_SUBSCRIBE_LINK = "tg://user?id=8597653867"
 DEFAULT_BUTTON_TEXT = "رب العالمين"
+DEFAULT_BUTTON_STYLE = "primary"
 
 REACTIONS_POOL = ["🥰", "😡", "😘", "🍓", "🤣", "🤗", "😭"]
 last_user_reaction = {}
@@ -134,11 +113,12 @@ def get_clean_url(input_str: str) -> str:
 async def get_sub_keyboard() -> InlineKeyboardMarkup:
     btn_text = await get_setting("btn_text", DEFAULT_BUTTON_TEXT)
     sub_link = await get_setting("sub_link", DEFAULT_SUBSCRIBE_LINK)
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=btn_text, url=sub_link, style="success")]])
+    btn_style = await get_setting("btn_style", DEFAULT_BUTTON_STYLE)
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=btn_text, url=sub_link, style=btn_style)]])
 
 async def get_force_sub_keyboard() -> InlineKeyboardMarkup:
     sub_link = await get_setting("sub_link", DEFAULT_SUBSCRIBE_LINK)
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="اشترك بالقناة", url=sub_link, style="danger")]])
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="اشترك بالقناة", url=sub_link, style="primary")]])
 
 def get_smart_reaction(last_reaction_dict, key: int) -> str:
     last = last_reaction_dict.get(key)
@@ -151,12 +131,7 @@ async def delayed_react(chat_id: int, message_id: int, emoji: str, delay: float 
     if delay is None: delay = random.choice([2.4, 3.6, 4.8])
     await asyncio.sleep(delay)
     try:
-        await bot.set_message_reaction(
-            chat_id=chat_id, 
-            message_id=message_id, 
-            reaction=[ReactionTypeEmoji(emoji=emoji)], 
-            is_big=False
-        )
+        await bot.set_message_reaction(chat_id=chat_id, message_id=message_id, reaction=[{"type": "emoji", "emoji": emoji}], is_big=False)
     except Exception:
         pass
 
@@ -302,19 +277,19 @@ async def queue_worker():
         if cached_row:
             file_id, media_type, title = cached_row
             if media_type == "audio":
-                audio_msg = await message.reply_audio(audio=file_id, caption=BotMessages.SUCCESS_AUDIO, title=title, reply_markup=sub_kb)
+                audio_msg = await message.reply_audio(audio=file_id, caption="وهايهية اغنيتك تاج راسي شتريد بعد\nتدلل بعدقلبي", title=title, reply_markup=sub_kb)
                 spawn_emoji_task(message)
                 bot_emoji = get_smart_reaction(last_bot_reaction, message.chat.id)
                 asyncio.create_task(delayed_react(message.chat.id, audio_msg.message_id, bot_emoji))
             else:
-                video_msg = await message.reply_video(video=file_id, caption=BotMessages.SUCCESS_VIDEO, reply_markup=sub_kb)
+                video_msg = await message.reply_video(video=file_id, caption="وهذا هوة الفيديو كدامك بالكامل\nالمايعرفني يعرفني شكد قوي", reply_markup=sub_kb)
                 spawn_emoji_task(message)
                 bot_emoji = get_smart_reaction(last_bot_reaction, message.chat.id)
                 asyncio.create_task(delayed_react(message.chat.id, video_msg.message_id, bot_emoji))
             download_queue.task_done()
             continue
 
-        proc_msg = BotMessages.PROCESSING_AUDIO if is_audio else BotMessages.PROCESSING_VIDEO
+        proc_msg = "يتم العثور والبدء ب استكشاف طلبك\nسيتم تنفيذه الان" if is_audio else "يتم العثور والبدء ب استكشاف طلبك\nسيتم ارسال الفيديو الان"
         status_msg = await live_typing_reply(message, proc_msg, reply_markup=sub_kb, trigger_emoji_logic=True)
         file_path = None
         
@@ -331,7 +306,7 @@ async def queue_worker():
                     try: os.rename(file_path, new_file_path); file_path = new_file_path
                     except Exception: pass
 
-                    audio_msg = await message.reply_audio(audio=FSInputFile(file_path), caption=BotMessages.SUCCESS_AUDIO, title=new_title, reply_markup=sub_kb)
+                    audio_msg = await message.reply_audio(audio=FSInputFile(file_path), caption="وهايهية اغنيتك تاج راسي شتريد بعد\nتدلل بعدقلبي", title=new_title, reply_markup=sub_kb)
                     spawn_emoji_task(message)
                     if audio_msg and audio_msg.audio:
                         async with aiosqlite.connect("bot_data.db") as db:
@@ -348,7 +323,7 @@ async def queue_worker():
                     try: os.rename(file_path, new_file_path); file_path = new_file_path
                     except Exception: pass
 
-                    video_msg = await message.reply_video(video=FSInputFile(file_path), caption=BotMessages.SUCCESS_VIDEO, reply_markup=sub_kb)
+                    video_msg = await message.reply_video(video=FSInputFile(file_path), caption="وهذا هوة الفيديو كدامك بالكامل\nالمايعرفني يعرفني شكد قوي", reply_markup=sub_kb)
                     spawn_emoji_task(message)
                     if video_msg and video_msg.video:
                         async with aiosqlite.connect("bot_data.db") as db:
@@ -358,11 +333,10 @@ async def queue_worker():
                     asyncio.create_task(delayed_react(message.chat.id, video_msg.message_id, bot_emoji))
             else:
                 if status_msg: await status_msg.delete()
-                await live_typing_reply(message, BotMessages.NOT_FOUND, reply_markup=sub_kb, trigger_emoji_logic=True)
-                
+                await live_typing_reply(message, "الرابط غير مدعوم او العنوان لم يتم العثور\nعليه عزيزي", reply_markup=sub_kb, trigger_emoji_logic=True)
         except Exception:
             if status_msg: await status_msg.delete()
-            await live_typing_reply(message, BotMessages.NOT_FOUND, reply_markup=sub_kb, trigger_emoji_logic=True)
+            await live_typing_reply(message, "الرابط غير مدعوم او العنوان لم يتم العثور\nعليه عزيزي", reply_markup=sub_kb, trigger_emoji_logic=True)
         finally:
             if file_path and os.path.exists(file_path):
                 try: os.remove(file_path)
@@ -380,23 +354,23 @@ async def handle_random_replies(message: Message):
     global welcome_state
     if message.text and (YOUTUBE_REGEX.search(message.text) or TIKTOK_REGEX.search(message.text) or REDGIFS_REGEX.search(message.text)):
         sub_kb = await get_sub_keyboard()
-        await live_typing_reply(message, BotMessages.NOT_FOUND, reply_markup=sub_kb, trigger_emoji_logic=True)
+        await live_typing_reply(message, "الرابط غير مدعوم او العنوان لم يتم العثور\nعليه عزيزي", reply_markup=sub_kb, trigger_emoji_logic=True)
         return
 
     if welcome_state:
         kb_primary = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="المطور", url="tg://user?id=8597653867", style="primary")]])
-        await live_typing_reply(message, BotMessages.RESP_1, reply_markup=kb_primary, trigger_emoji_logic=True)
+        await live_typing_reply(message, "اهلين وياك بوت MUsic تريد اشتغل\nدز لو رابط لو يوت وكول عنوان اغنيتك", reply_markup=kb_primary, trigger_emoji_logic=True)
         welcome_state = False
     else:
         kb_danger = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="رب العالمين", url="tg://user?id=8467593882", style="danger")]])
-        await live_typing_reply(message, BotMessages.RESP_2, reply_markup=kb_danger, trigger_emoji_logic=True)
+        await live_typing_reply(message, "مو ناوي تستعملني عدل?! تريد اضوج\nترى ازعل واصيح المولاي يهينك", reply_markup=kb_danger, trigger_emoji_logic=True)
         welcome_state = True
 
 @dp.message(F.text == "ادت")
 async def admin_cmd(message: Message):
     if message.from_user.id in ADMIN_IDS:
         kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="تعيين رابط زر الاشتراك"), KeyboardButton(text="عرض الزر")]], resize_keyboard=True)
-        await message.reply(BotMessages.ADMIN_MENU, reply_markup=kb)
+        await message.reply("تريد تغير اسم الزر دوس تغيير اسم الزر\nتريد تعين رابط الزر دوس تعيين الرابط", reply_markup=kb)
         spawn_emoji_task(message)
     else:
         is_group = message.chat.type in ["group", "supergroup"]
@@ -422,21 +396,21 @@ async def universal_handler(message: Message):
         if not is_group or (is_group and await is_user_admin_or_owner(chat_id, user_id, force_update=True)):
             if not await check_force_subscription(user_id):
                 force_kb = await get_force_sub_keyboard()
-                await live_typing_reply(message, BotMessages.FORCE_SUB, reply_markup=force_kb, trigger_emoji_logic=True)
+                await live_typing_reply(message, "اشترك بالقناة لو ماراح يشتغل وياك البوت\nضروري عيني", reply_markup=force_kb, trigger_emoji_logic=True)
                 return
             special_emoji = random.choice(["🌭", "🍌"])
             asyncio.create_task(delayed_react(chat_id, message.message_id, special_emoji, delay=0.0))
             spawn_emoji_task(message)
         return
 
-    if message.text and message.text != "ادت" and message.text not in ["تعيين رابط زر الاشتراك", "عرض الزر", "إلغاء"] and message.text.strip() != "بوت" and message.text.strip() != "يوت":
+    if message.text and message.text != "ادت" and message.text not in ["تعيين رابط زر الاشتراك", "عرض الزر", "الغاء"] and message.text.strip() != "بوت" and message.text.strip() != "يوت":
         if not is_group or (is_group and await is_user_admin_or_owner(chat_id, user_id)):
             user_emoji = get_smart_reaction(last_user_reaction, chat_id)
             asyncio.create_task(delayed_react(chat_id, message.message_id, user_emoji))
 
-    if message.text == "إلغاء" and user_id in ADMIN_IDS:
+    if message.text == "الغاء" and user_id in ADMIN_IDS:
         admin_states.pop(user_id, None)
-        await message.reply(BotMessages.CANCEL_MSG, reply_markup=ReplyKeyboardRemove())
+        await message.reply("صار وتدلل\nمنو يكدر يعصيك يبعد كسي اه", reply_markup=ReplyKeyboardRemove())
         spawn_emoji_task(message)
         return
 
@@ -446,22 +420,23 @@ async def universal_handler(message: Message):
             clean_url = get_clean_url(message.text)
             await set_setting("sub_link", clean_url)
             await set_setting("btn_text", "اشترك بالقناة")
-            await message.reply(BotMessages.SET_SUCCESS, reply_markup=ReplyKeyboardRemove())
+            await set_setting("btn_style", "primary")
+            await message.reply("تم تعيين زر الاشتراك العلني مثل ماردت\nسمعا وطاعة العيرك", reply_markup=ReplyKeyboardRemove())
         else:
-            await message.reply(BotMessages.BAD_LINK, reply_markup=ReplyKeyboardRemove())
+            await message.reply("اهو لاتمضرط وياي مو راح اضوج\nهوف منك مولاي", reply_markup=ReplyKeyboardRemove())
         spawn_emoji_task(message)
         return
 
     if message.text == "تعيين رابط زر الاشتراك" and user_id in ADMIN_IDS:
         admin_states[user_id] = "waiting_link"
-        kb_cancel = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="إلغاء")]], resize_keyboard=True)
-        await message.reply(BotMessages.ASK_LINK, reply_markup=kb_cancel)
+        kb_cancel = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="الغاء")]], resize_keyboard=True)
+        await message.reply("ارسل يوزر / رابط القناة او الكروب\nيلا مولاي", reply_markup=kb_cancel)
         spawn_emoji_task(message)
         return
 
     if message.text == "عرض الزر" and user_id in ADMIN_IDS:
         sub_kb = await get_sub_keyboard()
-        await message.reply(BotMessages.PREVIEW_MSG, reply_markup=sub_kb)
+        await message.reply("هيج صار الزر بعد عيني دوس وشوف الرابط\nيشتغل لو لا", reply_markup=sub_kb)
         spawn_emoji_task(message)
         return
 
@@ -476,7 +451,7 @@ async def universal_handler(message: Message):
     if yt_urls or tt_urls or rg_urls:
         if not await check_force_subscription(user_id):
             force_kb = await get_force_sub_keyboard()
-            await live_typing_reply(message, BotMessages.FORCE_SUB, reply_markup=force_kb, trigger_emoji_logic=True)
+            await live_typing_reply(message, "اشترك بالقناة لو ماراح يشتغل وياك البوت\nضروري عيني", reply_markup=force_kb, trigger_emoji_logic=True)
             return
             
         async with counter_lock:
@@ -498,7 +473,7 @@ async def universal_handler(message: Message):
     if message.text.startswith("يوت"):
         if not await check_force_subscription(user_id):
             force_kb = await get_force_sub_keyboard()
-            await live_typing_reply(message, BotMessages.FORCE_SUB, reply_markup=force_kb, trigger_emoji_logic=True)
+            await live_typing_reply(message, "اشترك بالقناة لو ماراح يشتغل وياك البوت\nضروري عيني", reply_markup=force_kb, trigger_emoji_logic=True)
             return
         query = message.text[3:].strip()
         if query:
@@ -514,7 +489,7 @@ async def universal_handler(message: Message):
 async def send_startup_notification():
     for admin_id in ADMIN_IDS:
         try:
-            msg = await bot.send_message(chat_id=admin_id, text=BotMessages.STARTUP_MSG)
+            msg = await bot.send_message(chat_id=admin_id, text="اشتغل البوت مرتلخ تاج راسي\nارضع عيرك ؟!")
             spawn_emoji_task(msg)
         except Exception:
             pass
