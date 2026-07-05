@@ -2,4 +2,3 @@ aiogram
 yt-dlp
 aiosqlite
 aiohttp
-pybind11

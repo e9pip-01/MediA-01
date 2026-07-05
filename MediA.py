@@ -4,10 +4,8 @@ import asyncio
 import random
 import aiosqlite
 import time
-import subprocess
-import glob
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from aiogram.types import Message, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, ReactionTypeEmoji
 import yt_dlp
 
 class BotMessages:
@@ -47,7 +45,6 @@ admin_states = {}
 ADMIN_IDS = [8597653867, 8467593882]
 DEFAULT_SUBSCRIBE_LINK = "tg://user?id=8597653867"
 DEFAULT_BUTTON_TEXT = "رب العالمين"
-DEFAULT_BUTTON_STYLE = "primary"
 
 REACTIONS_POOL = ["🥰", "😡", "😘", "🍓", "🤣", "🤗", "😭"]
 last_user_reaction = {}
@@ -97,6 +94,13 @@ async def set_setting(key: str, value: str):
         await db.execute("INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)", (key, value))
         await db.commit()
 
+def sanitize_filename(name: str) -> str:
+    cleaned = re.sub(r'[\/*?:"<>|]', '', name).strip()
+    return cleaned if cleaned else "Media_File"
+
+def format_english_title(title: str) -> str:
+    return re.sub(r'[atnmgfujl]', lambda m: m.group(0).upper(), title.lower())
+
 def extract_channel_chat_id(url: str):
     clean = url.strip()
     if "t.me/" in clean:
@@ -130,12 +134,11 @@ def get_clean_url(input_str: str) -> str:
 async def get_sub_keyboard() -> InlineKeyboardMarkup:
     btn_text = await get_setting("btn_text", DEFAULT_BUTTON_TEXT)
     sub_link = await get_setting("sub_link", DEFAULT_SUBSCRIBE_LINK)
-    btn_style = await get_setting("btn_style", DEFAULT_BUTTON_STYLE)
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=btn_text, url=sub_link, style=btn_style)]])
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=btn_text, url=sub_link, style="success")]])
 
 async def get_force_sub_keyboard() -> InlineKeyboardMarkup:
     sub_link = await get_setting("sub_link", DEFAULT_SUBSCRIBE_LINK)
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="اشترك بالقناة", url=sub_link, style="primary")]])
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="اشترك بالقناة", url=sub_link, style="danger")]])
 
 def get_smart_reaction(last_reaction_dict, key: int) -> str:
     last = last_reaction_dict.get(key)
@@ -148,7 +151,12 @@ async def delayed_react(chat_id: int, message_id: int, emoji: str, delay: float 
     if delay is None: delay = random.choice([2.4, 3.6, 4.8])
     await asyncio.sleep(delay)
     try:
-        await bot.set_message_reaction(chat_id=chat_id, message_id=message_id, reaction=[{"type": "emoji", "emoji": emoji}], is_big=False)
+        await bot.set_message_reaction(
+            chat_id=chat_id, 
+            message_id=message_id, 
+            reaction=[ReactionTypeEmoji(emoji=emoji)], 
+            is_big=False
+        )
     except Exception:
         pass
 
@@ -284,7 +292,6 @@ async def extract_and_download(target: str, is_audio: bool):
     return await loop.run_in_executor(None, sync_download)
 
 async def queue_worker():
-    import core_processor
     while True:
         message, target, user_id, is_audio, cache_key = await download_queue.get()
         async with aiosqlite.connect("bot_data.db") as db:
@@ -318,8 +325,8 @@ async def queue_worker():
                 base, ext = os.path.splitext(file_path)
                 
                 if is_audio:
-                    sanitized_orig = core_processor.sanitize_filename(orig_title)
-                    new_title = core_processor.format_english_title(sanitized_orig)
+                    sanitized_orig = sanitize_filename(orig_title)
+                    new_title = format_english_title(sanitized_orig)
                     new_file_path = f"{new_title}{ext}"
                     try: os.rename(file_path, new_file_path); file_path = new_file_path
                     except Exception: pass
@@ -334,7 +341,9 @@ async def queue_worker():
                     asyncio.create_task(delayed_react(message.chat.id, audio_msg.message_id, bot_emoji))
                 else:
                     rand_suffix = "".join([str(random.randint(0, 9)) for _ in range(9)])
-                    clean_uploader = core_processor.validate_uploader(uploader)
+                    sanitized_uploader = sanitize_filename(uploader)
+                    clean_uploader = re.sub(r'[^\w\-]', '', sanitized_uploader)
+                    if not clean_uploader: clean_uploader = "Publisher"
                     new_file_path = f"{clean_uploader}{rand_suffix}{ext}"
                     try: os.rename(file_path, new_file_path); file_path = new_file_path
                     except Exception: pass
@@ -350,6 +359,7 @@ async def queue_worker():
             else:
                 if status_msg: await status_msg.delete()
                 await live_typing_reply(message, BotMessages.NOT_FOUND, reply_markup=sub_kb, trigger_emoji_logic=True)
+                
         except Exception:
             if status_msg: await status_msg.delete()
             await live_typing_reply(message, BotMessages.NOT_FOUND, reply_markup=sub_kb, trigger_emoji_logic=True)
@@ -436,7 +446,6 @@ async def universal_handler(message: Message):
             clean_url = get_clean_url(message.text)
             await set_setting("sub_link", clean_url)
             await set_setting("btn_text", "اشترك بالقناة")
-            await set_setting("btn_style", "primary")
             await message.reply(BotMessages.SET_SUCCESS, reply_markup=ReplyKeyboardRemove())
         else:
             await message.reply(BotMessages.BAD_LINK, reply_markup=ReplyKeyboardRemove())
@@ -511,13 +520,6 @@ async def send_startup_notification():
             pass
 
 async def main():
-    compiled_files = glob.glob("core_processor*.so") + glob.glob("core_processor*.pyd")
-    if not compiled_files:
-        print("Buidling C++ core library automatically for Railway...")
-        compile_command = "g++ -O3 -Wall -shared -std=c++11 -fPIC $(python3 -m pybind11 --includes) processor.cpp -o core_processor$(python3-config --extension-suffix)"
-        subprocess.run(compile_command, shell=True, check=True)
-        print("C++ Core linked successfully!")
-
     await init_db()
     asyncio.create_task(queue_worker())
     asyncio.create_task(send_startup_notification())
