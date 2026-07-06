@@ -59,15 +59,6 @@ def clean_and_format_text(text: str) -> str:
     filtered = re.sub(r'\s+', ' ', filtered).strip()
     return filtered
 
-def format_profile_line(index: int, user_id: int, username: str or None) -> str:
-    num_map = {1: "¹", 2: "²", 3: "³", 4: "⁴", 5: "⁵", 6: "⁶", 7: "⁷", 8: "⁸", 9: "⁹"}
-    prefix = num_map.get(index, str(index))
-    if username:
-        clean_user = username.replace("@", "").replace("_", "\\_")
-        return f"{prefix}\\# / عرض البروفايل\n||@{clean_user}||"
-    else:
-        return f"[{prefix}\\# / عرض البروفايل](tg://user?id={user_id})"
-
 async def init_db():
     async with aiosqlite.connect("bot_data.db") as db:
         await db.execute("""
@@ -367,7 +358,7 @@ async def live_typing_progress_reply(message: Message, reply_markup=None, trigge
         percentage += 15
         if percentage > 100:
             percentage = 100
-        visible_text = f"يتم البدء ب استكشاف طلبك\nسيتم ارسال الميديا الان {percentage}%"
+        visible_text = f"يتم البدня ب استكشاف طلبك\nسيتم ارسال الميديا الان {percentage}%"
         try:
             await sent_msg.edit_text(visible_text)
         except Exception:
@@ -389,9 +380,9 @@ async def live_typing_progress_reply(message: Message, reply_markup=None, trigge
         pass
     return None
 
-async def extract_and_download(target: str):
+async def extract_and_download(target: str, mute_audio: bool = False):
     loop = asyncio.get_event_loop()
-    fmt = 'bestvideo+bestaudio/best'
+    fmt = 'bestvideo/best' if mute_audio else 'bestvideo+bestaudio/best'
     brave_headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
@@ -455,31 +446,39 @@ async def queue_worker():
         message, target, user_id, cache_key = await download_queue.get()
         chat_id = message.chat.id
         is_group = message.chat.type in ["group", "supergroup"]
-        protect = await is_content_protected(chat_id)
+        
+        content_text = message.text if message.text else (message.caption if message.caption else "")
+        is_sticker_mode = "ستيكر" in content_text
+        
+        protect = True if is_sticker_mode else await is_content_protected(chat_id)
+        
         async with aiosqlite.connect("bot_data.db") as db:
             async with db.execute("SELECT file_id, media_type, title FROM media_cache WHERE media_key = ?", (cache_key,)) as cursor:
                 cached_row = await cursor.fetchone()
         dynamic_kb = await get_dynamic_media_keyboard(user_id)
+        success_text = "الميديا الردتها كدامك مولاي\nيدلل تاج راسي"
         can_react = True
         if is_group:
             msg_sender = message.from_user.id if message.from_user else 0
             if msg_sender != bot.id and not await is_user_admin_or_owner(chat_id, msg_sender):
                 can_react = False
-        if cached_row:
+        if cached_row and not is_sticker_mode:
             file_id, media_type, title = cached_row
             last_sent_msg = None
             if media_type == "album":
                 file_ids = file_id.split(",")
                 chunks = [file_ids[i:i + 8] for i in range(0, len(file_ids), 8)]
-                for chunk in chunks:
-                    media_group = [InputMediaDocument(media=fid) for fid in chunk]
+                for i, chunk in enumerate(chunks):
+                    if i == 0:
+                        media_group = [InputMediaDocument(media=fid, caption=success_text if j == 0 else None) for j, fid in enumerate(chunk)]
+                    else:
+                        media_group = [InputMediaDocument(media=fid) for fid in chunk]
                     album_msgs = await message.reply_media_group(media=media_group, protect_content=protect)
                     if album_msgs:
                         last_sent_msg = album_msgs[0]
                     await asyncio.sleep(0.5)
             else:
-                last_sent_msg = await message.reply_document(document=file_id, reply_markup=None, protect_content=protect)
-            await message.reply(text="الميديا الردتها كدامك مولاي\nيدلل تاج راسي", reply_markup=dynamic_kb, protect_content=protect)
+                last_sent_msg = await message.reply_document(document=file_id, caption=success_text, reply_markup=dynamic_kb, protect_content=protect)
             if last_sent_msg:
                 spawn_emoji_task(last_sent_msg, trigger_by_user_id=user_id)
                 if can_react:
@@ -491,7 +490,7 @@ async def queue_worker():
         file_path = None
         is_img_type = False
         try:
-            res = await extract_and_download(target)
+            res = await extract_and_download(target, mute_audio=is_sticker_mode)
             if res and res[0]:
                 file_path, orig_title, uploader, media_id, is_img_type, actual_ext = res
                 last_sent_msg = None
@@ -499,8 +498,11 @@ async def queue_worker():
                     if isinstance(file_path, list):
                         chunks = [file_path[i:i + 8] for i in range(0, len(file_path), 8)]
                         all_collected_ids = []
-                        for chunk in chunks:
-                            media_group = [InputMediaDocument(media=FSInputFile(fp)) for fp in chunk]
+                        for i, chunk in enumerate(chunks):
+                            if i == 0:
+                                media_group = [InputMediaDocument(media=FSInputFile(fp), caption=success_text if j == 0 else None) for j, fp in enumerate(chunk)]
+                            else:
+                                media_group = [InputMediaDocument(media=FSInputFile(fp)) for fid in chunk]
                             album_msgs = await message.reply_media_group(media=media_group, protect_content=protect)
                             if album_msgs:
                                 last_sent_msg = album_msgs[0]
@@ -508,7 +510,7 @@ async def queue_worker():
                                     if m.document:
                                         all_collected_ids.append(m.document.file_id)
                             await asyncio.sleep(0.5)
-                        if all_collected_ids:
+                        if all_collected_ids and not is_sticker_mode:
                             async with aiosqlite.connect("bot_data.db") as db:
                                 await db.execute("INSERT OR REPLACE INTO media_cache (media_key, file_id, media_type, title) VALUES (?, ?, ?, ?)", (cache_key, ",".join(all_collected_ids), "album", orig_title))
                                 await db.commit()
@@ -528,12 +530,15 @@ async def queue_worker():
                         file_path = new_file_path
                     except Exception: 
                         pass
-                    last_sent_msg = await message.reply_document(document=FSInputFile(file_path), reply_markup=None, protect_content=protect)
-                    if last_sent_msg and last_sent_msg.document:
-                        async with aiosqlite.connect("bot_data.db") as db:
-                            await db.execute("INSERT OR REPLACE INTO media_cache (media_key, file_id, media_type, title) VALUES (?, ?, ?, ?)", (cache_key, last_sent_msg.document.file_id, "video", orig_title))
-                            await db.commit()
-                await message.reply(text="الميديا الردتها كدامك مولاي\nيدلل تاج راسي", reply_markup=dynamic_kb, protect_content=protect)
+                    
+                    if is_sticker_mode:
+                        last_sent_msg = await message.reply_video(video=FSInputFile(file_path), caption=success_text, reply_markup=dynamic_kb, protect_content=True)
+                    else:
+                        last_sent_msg = await message.reply_document(document=FSInputFile(file_path), caption=success_text, reply_markup=dynamic_kb, protect_content=protect)
+                        if last_sent_msg and last_sent_msg.document:
+                            async with aiosqlite.connect("bot_data.db") as db:
+                                await db.execute("INSERT OR REPLACE INTO media_cache (media_key, file_id, media_type, title) VALUES (?, ?, ?, ?)", (cache_key, last_sent_msg.document.file_id, "video", orig_title))
+                                await db.commit()
                 if last_sent_msg:
                     spawn_emoji_task(last_sent_msg, trigger_by_user_id=user_id)
                     if can_react:
@@ -597,47 +602,10 @@ async def show_commands_callback(callback: CallbackQuery):
         "مط تن / بالرد او بالايدي"
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="عودة", callback_data=f"back_main:{creator_id}", style="success")]
-    ])
-    try:
-        await callback.message.edit_text(text=cmds_text, reply_markup=kb)
-    except Exception:
-        pass
-    await callback.answer(cache_time=0)
-
-@dp.callback_query(F.data.startswith("info_cmds:"))
-async def info_cmds_callback(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    creator_id = int(callback.data.split(":")[1])
-    if user_id != creator_id:
-        await callback.answer("شكد طفل وشكد منيوج نعلعلا ابوك\nونعلعلا نيج امك ياسكط", show_alert=True)
-        return
-    cmds_text = (
-        "عرض المطورين\n"
-        "عرض مستعملين البوت"
-    )
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="عودة", callback_data=f"back_main:{creator_id}", style="success")]
-    ])
-    try:
-        await callback.message.edit_text(text=cmds_text, reply_markup=kb)
-    except Exception:
-        pass
-    await callback.answer(cache_time=0)
-
-@dp.callback_query(F.data.startswith("back_main:"))
-async def back_main_callback(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    creator_id = int(callback.data.split(":")[1])
-    if user_id != creator_id:
-        await callback.answer("شكد طفل وشكد منيوج نعلعلا ابوك\nونعلعلا نيج امك ياسكط", show_alert=True)
-        return
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="قفل / فتح", callback_data=f"show_cmds:{creator_id}", style="primary"), InlineKeyboardButton(text="عرض المعلومات", callback_data=f"info_cmds:{creator_id}", style="primary")],
         [InlineKeyboardButton(text="مسح", callback_data=f"delete_panel:{creator_id}", style="danger")]
     ])
     try:
-        await callback.message.edit_text(text="الاوامر والتعليمات", reply_markup=kb)
+        await callback.message.edit_text(text=cmds_text, reply_markup=kb)
     except Exception:
         pass
     await callback.answer(cache_time=0)
@@ -751,51 +719,6 @@ async def universal_handler(message: Message):
             return
         elif is_demote_cmd:
             return
-    if is_all_admins(user_id) and cmd_cleaned == "عرض المطورين":
-        all_devs = list(PRIMARY_ADMINS) + list(dynamic_admins)
-        if not all_devs:
-            await live_typing_reply(message, "ماكو مطورين بعد طيزي فدوة العيرك\nمن يصير تدلل", trigger_emoji_logic=True)
-            return
-        lines = []
-        for idx, dev_id in enumerate(all_devs, start=1):
-            username_str = None
-            try:
-                chat_info = await bot.get_chat(dev_id)
-                if chat_info.username:
-                    username_str = chat_info.username
-            except Exception:
-                pass
-            lines.append(format_profile_line(idx, dev_id, username_str))
-        final_text = "\n\n".join(lines)
-        await live_typing_reply(message, final_text, trigger_emoji_logic=True, parse_mode="MarkdownV2")
-        return
-    if is_all_admins(user_id) and cmd_cleaned == "عرض مستعملين البوت":
-        collected_users = set()
-        async with aiosqlite.connect("bot_data.db") as db:
-            async with db.execute("SELECT user_id FROM users_log") as cursor:
-                rows = await cursor.fetchall()
-                for r in rows: 
-                    collected_users.add(r[0])
-        for uid in PRIMARY_ADMINS:
-            collected_users.discard(uid)
-        for uid in dynamic_admins:
-            collected_users.discard(uid)
-        if not collected_users:
-            await live_typing_reply(message, "ماكو مستعملين بعد طيزي فدوة العيرك\nمن يصير تدلل", trigger_emoji_logic=True)
-            return
-        lines = []
-        for idx, usr_id in enumerate(list(collected_users)[:50], start=1):
-            username_str = None
-            try:
-                chat_info = await bot.get_chat(usr_id)
-                if chat_info.username:
-                    username_str = chat_info.username
-            except Exception:
-                pass
-            lines.append(format_profile_line(idx, usr_id, username_str))
-        final_text = "\n\n".join(lines)
-        await live_typing_reply(message, final_text, trigger_emoji_logic=True, parse_mode="MarkdownV2")
-        return
     if is_group:
         is_service = (
             message.new_chat_members or 
@@ -835,7 +758,7 @@ async def universal_handler(message: Message):
     if cmd_cleaned == "الاوامر":
         if is_all_admins(user_id) or (is_group and await is_user_owner(chat_id, user_id)) or (not is_group and not is_channel):
             kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="قفل / فتح", callback_data=f"show_cmds:{user_id}", style="primary"), InlineKeyboardButton(text="عرض المعلومات", callback_data=f"info_cmds:{user_id}", style="primary")],
+                [InlineKeyboardButton(text="قفل / فتح", callback_data=f"show_cmds:{user_id}", style="primary")],
                 [InlineKeyboardButton(text="مسح", callback_data=f"delete_panel:{user_id}", style="danger")]
             ])
             resp = await message.reply("الاوامر والتعليمات", reply_markup=kb, protect_content=protect)
@@ -958,9 +881,12 @@ async def universal_handler(message: Message):
             for url in downloadable_urls:
                 if current_count >= 7: break
                 current_count += 1; user_task_counts[user_id] = current_count
-                await download_queue.put((message, url, user_id, f"media_{url}"))
+                
+                is_sticker_mode = "ستيكر" in content_text
+                cache_suffix = f"media_{url}_muted" if is_sticker_mode else f"media_{url}"
+                await download_queue.put((message, url, user_id, cache_suffix))
         return
-    if content_text.strip() in ["ادت", "تعيين الرابط", "عرض الزر", "الغاء", "عودة", "قفل النقل", "فتح النقل", "قفل الاشعارات", "فتح الاشعارات", "الاوامر", "رفع مطور", "تنزيل مطور", "مط", "تن", "عرض المطورين", "عرض مستعملين البوت"] or content_text.strip().startswith(("رفع مطور ", "تنزيل مطور ", "مط ", "تن ")):
+    if content_text.strip() in ["ادت", "تعيين الرابط", "عرض الزر", "الغاء", "عودة", "قفل النقل", "فتح النقل", "قفل الاشعارات", "فتح الاشعارات", "الاوامر", "رفع مطور", "تنزيل مطور", "مط", "تن"] or content_text.strip().startswith(("رفع مطور ", "تنزيل مطور ", "مط ", "تن ")):
         return
     if is_group:
         if content_text.strip() == "بوت":
