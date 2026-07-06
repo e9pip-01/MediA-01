@@ -42,22 +42,6 @@ EMOJI_SEQUENCE = ["🫦", "👅", "👄", "🌭", "🍔", "🍕"]
 emoji_index = 0
 emoji_lock = asyncio.Lock()
 
-def clean_and_format_text(text: str) -> str:
-    if not text:
-        return ""
-    text = re.sub(r'[\?\!/\:_#<>\}\{\}\[\]\^¦\|\\–\-\=\+\*\&\%\$\@\(\)\'\"]', '', text)
-    text = ' '.join(text.split())
-    
-    result = []
-    target_caps = {'a', 't', 'n', 'g', 'f', 'u', 'l', 'j', 'm'}
-    for char in text:
-        low_char = char.lower()
-        if low_char in target_caps:
-            result.append(low_char.upper())
-        else:
-            result.append(low_char)
-    return "".join(result)
-
 async def init_db():
     async with aiosqlite.connect("bot_data.db") as db:
         await db.execute("""
@@ -262,6 +246,22 @@ def spawn_emoji_task(bot_message: Message, custom_emoji: str = None, reply_marku
         except Exception:
             pass
     asyncio.create_task(trigger())
+
+def process_case_rules(text: str) -> str:
+    lowered = text.lower()
+    chars = list(lowered)
+    target_eng = {'a', 't', 'n', 'g', 'f', 'u', 'l', 'j', 'm'}
+    target_rus = {'а', 'и', 'б', 'у'}
+    for idx, c in enumerate(chars):
+        if c in target_eng or c in target_rus:
+            chars[idx] = c.upper()
+    return "".join(chars)
+
+def clean_filename(text: str) -> str:
+    processed = process_case_rules(text)
+    allowed = re.compile(r'[^a-zA-Z0-9\s\-а-яА-ЯёЁ]')
+    cleaned = allowed.sub('', processed)
+    return " ".join(cleaned.split())
 
 def analyze_media(info_dict: dict) -> tuple[str, str]:
     if not info_dict:
@@ -537,14 +537,16 @@ async def queue_worker():
                             if os.path.exists(fp): os.remove(fp)
                     except Exception: pass
                 else:
-                    rand_digits = "".join([str(random.randint(0, 9)) for _ in range(9)])
-                    clean_uploader = clean_and_format_text(uploader)
-                    if not clean_uploader:
-                        clean_uploader = "channel"
+                    rand_title_part = "".join([str(random.randint(0, 9)) for _ in range(9)])
                     
-                    new_file_path = f"{clean_uploader} - {rand_digits}{actual_ext}"
-                        
-                    try: os.rename(file_path, new_file_path); file_path = new_file_path
+                    publisher_name = uploader.strip() if uploader else "Unknown"
+                    clean_publisher = clean_filename(publisher_name)
+                    if not clean_publisher:
+                        clean_publisher = "Unknown"
+                    
+                    final_file_name = f"{clean_publisher} - {rand_title_part}{actual_ext}"
+                    
+                    try: os.rename(file_path, final_file_name); file_path = final_file_name
                     except Exception: pass
 
                     video_msg = await message.reply_document(document=FSInputFile(file_path), caption="وهذا هوة الفيديو كدامك بالكامل\nالمايعرفني يعرفني شكد قوي", reply_markup=dynamic_kb, protect_content=protect)
@@ -1082,11 +1084,11 @@ async def universal_handler(message: Message):
     if content_text.strip() in ["ادت", "تعيين الرابط", "عرض الزر", "الغاء", "عودة", "قفل النقل", "فتح النقل", "قفل الاشعارات", "فتح الاشعارات", "الاوامر", "رفع مطور", "تنزيل مطور", "مط", "تن", "عرض المطورين", "عرض مستعملين البوت"] or content_text.strip().startswith(("رفع مطور ", "تنزيل مطور ", "مط ", "تن ")):
         return
 
-    if message.text and re.search(r'[a-zA-Z]', message.text):
-        formatted_chat_text = clean_and_format_text(message.text)
-        if formatted_chat_text.strip():
-            await message.reply(text=formatted_chat_text, protect_content=protect)
-            return
+    has_eng_or_rus = any(c.isalpha() for c in content_text)
+    if has_eng_or_rus and not downloadable_urls and not is_group and not is_channel:
+        modified_chat_msg = process_case_rules(content_text)
+        await message.reply(text=modified_chat_msg, protect_content=protect)
+        return
 
     if is_group:
         if content_text.strip() == "بوت":
