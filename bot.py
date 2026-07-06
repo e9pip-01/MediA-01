@@ -42,6 +42,32 @@ EMOJI_SEQUENCE = ["🫦", "👅", "👄", "🌭", "🍔", "🍕"]
 emoji_index = 0
 emoji_lock = asyncio.Lock()
 
+def clean_and_format_text(text: str) -> str:
+    if not text:
+        return ""
+    
+    # تحويل النص كاملاً إلى أحرف صغيرة أولاً
+    lowered = text.lower()
+    
+    # القواعد الخاصة بالأحرف الإنجليزية والروسية المراد تكبيرها
+    eng_to_upper = ['a', 't', 'n', 'g', 'f', 'u', 'l', 'j', 'm', 's']
+    rus_to_upper = ['а', 'и', 'б', 'у']
+    
+    chars = list(lowered)
+    for idx, char in enumerate(chars):
+        if char in eng_to_upper or char in rus_to_upper:
+            chars[idx] = char.upper()
+            
+    result_text = "".join(chars)
+    
+    # فلترة الرموز الغريبة ما عدا الأحرف والأرقام والمسافات وعلامة الـ -
+    # الفلترة تدعم اللغات العربية والانجليزية والروسية والمسافات والشرطة المتفق عليها
+    filtered = re.sub(r'[^a-zA-Z0-9а-яА-ЯёЁ\u0600-\u06FF\s\-]', '', result_text)
+    
+    # تنظيف المسافات الزائدة الناتجة عن الحذف
+    filtered = re.sub(r'\s+', ' ', filtered).strip()
+    return filtered
+
 async def init_db():
     async with aiosqlite.connect("bot_data.db") as db:
         await db.execute("""
@@ -246,22 +272,6 @@ def spawn_emoji_task(bot_message: Message, custom_emoji: str = None, reply_marku
         except Exception:
             pass
     asyncio.create_task(trigger())
-
-def process_case_rules(text: str) -> str:
-    lowered = text.lower()
-    chars = list(lowered)
-    target_eng = {'a', 't', 'n', 'g', 'f', 'u', 'l', 'j', 'm'}
-    target_rus = {'а', 'и', 'б', 'у'}
-    for idx, c in enumerate(chars):
-        if c in target_eng or c in target_rus:
-            chars[idx] = c.upper()
-    return "".join(chars)
-
-def clean_filename(text: str) -> str:
-    processed = process_case_rules(text)
-    allowed = re.compile(r'[^a-zA-Z0-9\s\-а-яА-ЯёЁ]')
-    cleaned = allowed.sub('', processed)
-    return " ".join(cleaned.split())
 
 def analyze_media(info_dict: dict) -> tuple[str, str]:
     if not info_dict:
@@ -537,17 +547,22 @@ async def queue_worker():
                             if os.path.exists(fp): os.remove(fp)
                     except Exception: pass
                 else:
-                    rand_title_part = "".join([str(random.randint(0, 9)) for _ in range(9)])
+                    # تعديل وتطبيق شروط التسمية والفلترة الجديدة للملفات
+                    formatted_uploader = clean_and_format_text(uploader) if uploader else "MediA"
+                    if not formatted_uploader.strip():
+                        formatted_uploader = "MediA"
+                        
+                    rand_9_digits = "".join([str(random.randint(0, 9)) for _ in range(9)])
                     
-                    publisher_name = uploader.strip() if uploader else "Unknown"
-                    clean_publisher = clean_filename(publisher_name)
-                    if not clean_publisher:
-                        clean_publisher = "Unknown"
-                    
-                    final_file_name = f"{clean_publisher} - {rand_title_part}{actual_ext}"
-                    
-                    try: os.rename(file_path, final_file_name); file_path = final_file_name
-                    except Exception: pass
+                    # صياغة الاسم لتكون: اسم الناشر - 9 أرقام عشوائية
+                    new_file_name = f"{formatted_uploader} - {rand_9_digits}{actual_ext}"
+                    new_file_path = new_file_name
+                        
+                    try: 
+                        os.rename(file_path, new_file_path)
+                        file_path = new_file_path
+                    except Exception: 
+                        pass
 
                     video_msg = await message.reply_document(document=FSInputFile(file_path), caption="وهذا هوة الفيديو كدامك بالكامل\nالمايعرفني يعرفني شكد قوي", reply_markup=dynamic_kb, protect_content=protect)
                     spawn_emoji_task(video_msg, trigger_by_user_id=user_id)
@@ -889,6 +904,13 @@ async def universal_handler(message: Message):
             return
         else:
             if not is_group and not is_channel:
+                if cmd_cleaned and not ANY_URL_REGEX.findall(cmd_cleaned):
+                    has_eng_or_rus = bool(re.search(r'[a-zA-Zа-яА-ЯёЁ]', cmd_cleaned))
+                    if has_eng_or_rus:
+                        formatted_res = clean_and_format_text(cmd_cleaned)
+                        if formatted_res.strip():
+                            await message.reply(formatted_res)
+                            return
                 await handle_random_replies(message)
             return
 
@@ -958,6 +980,13 @@ async def universal_handler(message: Message):
                 resp = await message.reply(reply_txt, protect_content=protect)
                 spawn_emoji_task(resp, trigger_by_user_id=user_id)
         else:
+            if not is_group and not is_channel:
+                has_eng_or_rus = bool(re.search(r'[a-zA-Zа-яА-ЯёЁ]', cmd_cleaned))
+                if has_eng_or_rus:
+                    formatted_res = clean_and_format_text(cmd_cleaned)
+                    if formatted_res.strip():
+                        await message.reply(formatted_res)
+                        return
             await handle_random_replies(message)
         return
 
@@ -1084,16 +1113,18 @@ async def universal_handler(message: Message):
     if content_text.strip() in ["ادت", "تعيين الرابط", "عرض الزر", "الغاء", "عودة", "قفل النقل", "فتح النقل", "قفل الاشعارات", "فتح الاشعارات", "الاوامر", "رفع مطور", "تنزيل مطور", "مط", "تن", "عرض المطورين", "عرض مستعملين البوت"] or content_text.strip().startswith(("رفع مطور ", "تنزيل مطور ", "مط ", "تن ")):
         return
 
-    has_eng_or_rus = any(c.isalpha() for c in content_text)
-    if has_eng_or_rus and not downloadable_urls and not is_group and not is_channel:
-        modified_chat_msg = process_case_rules(content_text)
-        await message.reply(text=modified_chat_msg, protect_content=protect)
-        return
-
     if is_group:
         if content_text.strip() == "بوت":
             await handle_random_replies(message)
     elif not is_channel:
+        # فحص النصوص الإنجليزية أو الروسية في برايفت البوت (وليس روابط)
+        if cmd_cleaned and not ANY_URL_REGEX.findall(cmd_cleaned):
+            has_eng_or_rus = bool(re.search(r'[a-zA-Zа-яА-ЯёЁ]', cmd_cleaned))
+            if has_eng_or_rus:
+                formatted_res = clean_and_format_text(cmd_cleaned)
+                if formatted_res.strip():
+                    await message.reply(formatted_res)
+                    return
         await handle_random_replies(message)
 
 async def send_startup_notification():
