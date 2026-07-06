@@ -2,7 +2,7 @@ import os
 import re
 import asyncio
 import random
-import asyncpg
+import aiosqlite
 import time
 import mimetypes
 import urllib.parse
@@ -12,17 +12,10 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, ChatMemberUpdated, CallbackQuery, InputMediaDocument
 from aiogram.filters import ChatMemberUpdatedFilter
 import yt_dlp
-from google import genai
-from google.genai import types
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
-
-DATABASE_URL = os.getenv("DATABASE_URL")
-
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-ai_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 download_queue = asyncio.Queue()
 user_task_counts = {}
@@ -68,26 +61,22 @@ def clean_and_format_text(text: str) -> str:
     filtered = re.sub(r'\s+', ' ', filtered).strip()
     return filtered
 
-async def get_db_connection():
-    return await asyncpg.connect(DATABASE_URL)
-
 async def init_db():
-    conn = await get_db_connection()
-    try:
-        await conn.execute("""
+    async with aiosqlite.connect("bot_data.db") as db:
+        await db.execute("""
             CREATE TABLE IF NOT EXISTS users_log (
-                user_id BIGINT PRIMARY KEY
+                user_id INTEGER PRIMARY KEY
             )
         """)
-        await conn.execute("""
+        await db.execute("""
             CREATE TABLE IF NOT EXISTS permissions_cache (
-                chat_id BIGINT,
-                user_id BIGINT,
-                is_admin INT,
+                chat_id INTEGER,
+                user_id INTEGER,
+                is_admin INTEGER,
                 PRIMARY KEY (chat_id, user_id)
             )
         """)
-        await conn.execute("""
+        await db.execute("""
             CREATE TABLE IF NOT EXISTS media_cache (
                 media_key TEXT PRIMARY KEY,
                 file_id TEXT,
@@ -95,64 +84,54 @@ async def init_db():
                 title TEXT
             )
         """)
-        await conn.execute("""
+        await db.execute("""
             CREATE TABLE IF NOT EXISTS bot_settings (
                 key TEXT PRIMARY KEY,
                 value TEXT
             )
         """)
-        await conn.execute("""
+        await db.execute("""
             CREATE TABLE IF NOT EXISTS chat_notifications (
-                chat_id BIGINT PRIMARY KEY,
+                chat_id INTEGER PRIMARY KEY,
                 status TEXT
             )
         """)
-        await conn.execute("""
+        await db.execute("""
             CREATE TABLE IF NOT EXISTS chat_protection (
-                chat_id BIGINT PRIMARY KEY,
+                chat_id INTEGER PRIMARY KEY,
                 status TEXT
             )
         """)
-        await conn.execute("""
+        await db.execute("""
             CREATE TABLE IF NOT EXISTS translation_settings (
-                user_id BIGINT PRIMARY KEY,
+                user_id INTEGER PRIMARY KEY,
                 lang TEXT,
-                mode INT
+                mode INTEGER
             )
         """)
-    finally:
-        await conn.close()
+        await db.commit()
 
 def is_all_admins(user_id: int) -> bool:
     return user_id in PRIMARY_ADMINS
 
 async def get_setting(key: str, default: str) -> str:
-    conn = await get_db_connection()
-    try:
-        row = await conn.fetchrow("SELECT value FROM bot_settings WHERE key = $1", key)
-        if row: return row['value']
-        return default
-    finally:
-        await conn.close()
+    async with aiosqlite.connect("bot_data.db") as db:
+        async with db.execute("SELECT value FROM bot_settings WHERE key = ?", (key,)) as cursor:
+            row = await cursor.fetchone()
+            if row: return row[0]
+            return default
 
 async def set_setting(key: str, value: str):
-    conn = await get_db_connection()
-    try:
-        await conn.execute("""
-            INSERT INTO bot_settings (key, value) VALUES ($1, $2)
-            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
-        """, key, value)
-    finally:
-        await conn.close()
+    async with aiosqlite.connect("bot_data.db") as db:
+        await db.execute("INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)", (key, value))
+        await db.commit()
 
 async def is_content_protected(chat_id: int) -> bool:
-    conn = await get_db_connection()
-    try:
-        row = await conn.fetchrow("SELECT status FROM chat_protection WHERE chat_id = $1", chat_id)
-        if row: return row['status'] == "locked"
-        return False
-    finally:
-        await conn.close()
+    async with aiosqlite.connect("bot_data.db") as db:
+        async with db.execute("SELECT status FROM chat_protection WHERE chat_id = ?", (chat_id,)) as cursor:
+            row = await cursor.fetchone()
+            if row: return row[0] == "locked"
+            return False
 
 def extract_channel_chat_id(url: str):
     clean = url.strip()
@@ -227,25 +206,18 @@ async def delayed_react(chat_id: int, message_id: int, emoji: str, delay: float 
 async def is_user_admin_or_owner(chat_id: int, user_id: int, force_update: bool = False) -> bool:
     if is_all_admins(user_id): return True
     if not force_update:
-        conn = await get_db_connection()
-        try:
-            row = await conn.fetchrow("SELECT is_admin FROM permissions_cache WHERE chat_id = $1 AND user_id = $2", chat_id, user_id)
-            if row: return bool(row['is_admin'])
-        finally:
-            await conn.close()
+        async with aiosqlite.connect("bot_data.db") as db:
+            async with db.execute("SELECT is_admin FROM permissions_cache WHERE chat_id = ? AND user_id = ?", (chat_id, user_id)) as cursor:
+                row = await cursor.fetchone()
+                if row: return bool(row[0])
     try:
         member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
         res = member.status in ["administrator", "creator"]
     except Exception:
         res = False
-    conn = await get_db_connection()
-    try:
-        await conn.execute("""
-            INSERT INTO permissions_cache (chat_id, user_id, is_admin) VALUES ($1, $2, $3)
-            ON CONFLICT (chat_id, user_id) DO UPDATE SET is_admin = EXCLUDED.is_admin
-        """, chat_id, user_id, int(res))
-    finally:
-        await conn.close()
+    async with aiosqlite.connect("bot_data.db") as db:
+        await db.execute("INSERT OR REPLACE INTO permissions_cache (chat_id, user_id, is_admin) VALUES (?, ?, ?)", (chat_id, user_id, int(res)))
+        await db.commit()
     return res
 
 async def is_user_owner(chat_id: int, user_id: int) -> bool:
@@ -260,11 +232,9 @@ async def is_user_owner(chat_id: int, user_id: int) -> bool:
 async def on_chat_member_updated(event: ChatMemberUpdated):
     chat_id = event.chat.id
     user_id = event.new_chat_member.user.id
-    conn = await get_db_connection()
-    try:
-        await conn.execute("DELETE FROM permissions_cache WHERE chat_id = $1 AND user_id = $2", chat_id, user_id)
-    finally:
-        await conn.close()
+    async with aiosqlite.connect("bot_data.db") as db:
+        await db.execute("DELETE FROM permissions_cache WHERE chat_id = ? AND user_id = ?", (chat_id, user_id))
+        await db.commit()
 
 def spawn_emoji_task(bot_message: Message, custom_emoji: str = None, reply_markup=None, trigger_by_user_id: int = 0):
     async def trigger():
@@ -453,12 +423,9 @@ async def queue_worker():
         
         protect = True if is_sticker_mode else await is_content_protected(chat_id)
         
-        conn = await get_db_connection()
-        try:
-            cached_row = await conn.fetchrow("SELECT file_id, media_type, title FROM media_cache WHERE media_key = $1", cache_key)
-        finally:
-            await conn.close()
-            
+        async with aiosqlite.connect("bot_data.db") as db:
+            async with db.execute("SELECT file_id, media_type, title FROM media_cache WHERE media_key = ?", (cache_key,)) as cursor:
+                cached_row = await cursor.fetchone()
         dynamic_kb = await get_dynamic_media_keyboard(user_id)
         success_text = "الميديا الردتها كدامك مولاي\nيدلل تاج راسي"
         
@@ -467,9 +434,7 @@ async def queue_worker():
         ])
         
         if cached_row and not is_sticker_mode:
-            file_id = cached_row['file_id']
-            media_type = cached_row['media_type']
-            title = cached_row['title']
+            file_id, media_type, title = cached_row
             last_sent_msg = None
             if media_type == "album":
                 file_ids = file_id.split(",")
@@ -520,14 +485,9 @@ async def queue_worker():
                                         all_collected_ids.append(m.document.file_id)
                             await asyncio.sleep(0.5)
                         if all_collected_ids and not is_sticker_mode:
-                            conn = await get_db_connection()
-                            try:
-                                await conn.execute("""
-                                    INSERT INTO media_cache (media_key, file_id, media_type, title) VALUES ($1, $2, $3, $4)
-                                    ON CONFLICT (media_key) DO UPDATE SET file_id = EXCLUDED.file_id, media_type = EXCLUDED.media_type, title = EXCLUDED.title
-                                """, cache_key, ",".join(all_collected_ids), "album", orig_title)
-                            finally:
-                                await conn.close()
+                            async with aiosqlite.connect("bot_data.db") as db:
+                                await db.execute("INSERT OR REPLACE INTO media_cache (media_key, file_id, media_type, title) VALUES (?, ?, ?, ?)", (cache_key, ",".join(all_collected_ids), "album", orig_title))
+                                await db.commit()
                     try:
                         for fp in (file_path if isinstance(file_path, list) else [file_path]):
                             if os.path.exists(fp): os.remove(fp)
@@ -550,14 +510,9 @@ async def queue_worker():
                     else:
                         last_sent_msg = await message.reply_document(document=FSInputFile(file_path), reply_markup=dynamic_kb, protect_content=protect)
                         if last_sent_msg and last_sent_msg.document:
-                            conn = await get_db_connection()
-                            try:
-                                await conn.execute("""
-                                    INSERT INTO media_cache (media_key, file_id, media_type, title) VALUES ($1, $2, $3, $4)
-                                    ON CONFLICT (media_key) DO UPDATE SET file_id = EXCLUDED.file_id, media_type = EXCLUDED.media_type, title = EXCLUDED.title
-                                """, cache_key, last_sent_msg.document.file_id, "video", orig_title)
-                            finally:
-                                await conn.close()
+                            async with aiosqlite.connect("bot_data.db") as db:
+                                await db.execute("INSERT OR REPLACE INTO media_cache (media_key, file_id, media_type, title) VALUES (?, ?, ?, ?)", (cache_key, last_sent_msg.document.file_id, "video", orig_title))
+                                await db.commit()
                     if last_sent_msg:
                         bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
                         asyncio.create_task(delayed_react(chat_id, last_sent_msg.message_id, bot_emoji))
@@ -600,27 +555,17 @@ async def handle_random_replies(message: Message):
 async def translate_text(text: str, target_lang: str) -> str:
     if not text:
         return ""
-    if not ai_client:
-        return text
     loop = asyncio.get_event_loop()
-    def ai_translate():
+    def google_translate():
         try:
-            lang_name = "English" if target_lang == "en" else "Russian" if target_lang == "ru" else target_lang
-            prompt = (
-                f"You are an expert translator. Translate the following text into {lang_name}. "
-                f"Preserve the original tone and context, but maintain strict accuracy. "
-                f"Output ONLY the final translated text, without any additional comments, notes, or explanations.\n\n"
-                f"Text to translate: {text}"
-            )
-            response = ai_client.models.generate_content(
-                model='gemini-2.5-flash',
-                contents=prompt,
-            )
-            return response.text.strip()
+            url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl={target_lang}&dt=t&q=" + urllib.parse.quote(text)
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req) as response:
+                res = json.loads(response.read().decode('utf-8'))
+                return "".join([sentence[0] for sentence in res[0] if sentence[0]])
         except Exception:
             return text
-
-    translated = await loop.run_in_executor(None, ai_translate)
+    translated = await loop.run_in_executor(None, google_translate)
     lowered = translated.lower()
     eng_to_upper = ['a', 't', 'n', 'g', 'f', 'u', 'l', 'j', 'm', 's']
     rus_to_upper = ['а', 'и', 'б', 'у']
@@ -708,11 +653,9 @@ async def universal_handler(message: Message):
     
     if user_id > 0:
         if message.text == "/start":
-            conn = await get_db_connection()
-            try:
-                await conn.execute("INSERT INTO users_log (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING", user_id)
-            finally:
-                await conn.close()
+            async with aiosqlite.connect("bot_data.db") as db:
+                await db.execute("INSERT OR IGNORE INTO users_log (user_id) VALUES (?)", (user_id,))
+                await db.commit()
                 
     can_react_global = False
     if not is_group and not is_channel:
@@ -758,15 +701,13 @@ async def universal_handler(message: Message):
             message.general_forum_topic_unhidden
         )
         if is_service:
-            conn = await get_db_connection()
-            try:
-                row = await conn.fetchrow("SELECT status FROM chat_notifications WHERE chat_id = $1", chat_id)
-            finally:
-                await conn.close()
-            if row and row['status'] == "locked":
-                try: await message.delete()
-                except Exception: pass
-                return
+            async with aiosqlite.connect("bot_data.db") as db:
+                async with db.execute("SELECT status FROM chat_notifications WHERE chat_id = ?", (chat_id,)) as cursor:
+                    row = await cursor.fetchone()
+                    if row and row[0] == "locked":
+                        try: await message.delete()
+                        except Exception: pass
+                        return
                         
     if cmd_cleaned == "الاوامر":
         if is_all_admins(user_id) or (is_group and await is_user_owner(chat_id, user_id)) or is_channel or (not is_group and not is_channel):
@@ -785,14 +726,9 @@ async def universal_handler(message: Message):
         if is_group or is_channel:
             if is_channel or is_all_admins(user_id) or await is_user_owner(chat_id, user_id):
                 status_to_set = "locked" if cmd_cleaned == "قفل الاشعارات" else "unlocked"
-                conn = await get_db_connection()
-                try:
-                    await conn.execute("""
-                        INSERT INTO chat_notifications (chat_id, status) VALUES ($1, $2)
-                        ON CONFLICT (chat_id) DO UPDATE SET status = EXCLUDED.status
-                    """, chat_id, status_to_set)
-                finally:
-                    await conn.close()
+                async with aiosqlite.connect("bot_data.db") as db:
+                    await db.execute("INSERT OR REPLACE INTO chat_notifications (chat_id, status) VALUES (?, ?)", (chat_id, status_to_set))
+                    await db.commit()
                 action_word = "قفل" if status_to_set == "locked" else "فتح"
                 reply_txt = f"¹# - تم {action_word} الاشعارات مولاي\nيدلل تاج راسي"
                 resp = await message.reply(reply_txt, protect_content=protect)
@@ -801,13 +737,11 @@ async def universal_handler(message: Message):
             if not is_group and not is_channel:
                 has_eng_or_rus = bool(re.search(r'[a-zA-Zа-яА-ЯёЁ]', cmd_cleaned))
                 if has_eng_or_rus:
-                    conn = await get_db_connection()
-                    try:
-                        t_row = await conn.fetchrow("SELECT lang, mode FROM translation_settings WHERE user_id = $1", user_id)
-                    finally:
-                        await conn.close()
-                    if t_row and t_row['mode'] == 1 and t_row['lang']:
-                        formatted_res = await translate_text(cmd_cleaned, t_row['lang'])
+                    async with aiosqlite.connect("bot_data.db") as db:
+                        async with db.execute("SELECT lang, mode FROM translation_settings WHERE user_id = ?", (user_id,)) as cursor:
+                            t_row = await cursor.fetchone()
+                    if t_row and t_row[1] == 1 and t_row[0]:
+                        formatted_res = await translate_text(cmd_cleaned, t_row[0])
                     else:
                         formatted_res = clean_and_format_text(cmd_cleaned)
                     if formatted_res.strip():
@@ -820,14 +754,9 @@ async def universal_handler(message: Message):
     if cmd_cleaned in ["قفل النقل", "فتح النقل"]:
         if is_channel or is_all_admins(user_id) or (is_group and await is_user_owner(chat_id, user_id)) or (not is_group and not is_channel):
             status_to_set = "locked" if cmd_cleaned == "قفل النقل" else "unlocked"
-            conn = await get_db_connection()
-            try:
-                await conn.execute("""
-                    INSERT INTO chat_protection (chat_id, status) VALUES ($1, $2)
-                    ON CONFLICT (chat_id) DO UPDATE SET status = EXCLUDED.status
-                """, chat_id, status_to_set)
-            finally:
-                await conn.close()
+            async with aiosqlite.connect("bot_data.db") as db:
+                await db.execute("INSERT OR REPLACE INTO chat_protection (chat_id, status) VALUES (?, ?)", (chat_id, status_to_set))
+                await db.commit()
             action_word = "قفل" if status_to_set == "locked" else "فتح"
             reply_txt = f"¹# - تم {action_word} النقل مولاي\nيدلل تاج راسي"
             new_protect = (status_to_set == "locked")
@@ -877,14 +806,9 @@ async def universal_handler(message: Message):
     if cmd_cleaned in ["الانكليزيه", "الروسيه"] and not is_group and not is_channel:
         if is_all_admins(user_id):
             target_lang = "en" if cmd_cleaned == "الانكليزيه" else "ru"
-            conn = await get_db_connection()
-            try:
-                await conn.execute("""
-                    INSERT INTO translation_settings (user_id, lang, mode) VALUES ($1, $2, (SELECT mode FROM translation_settings WHERE user_id = $3))
-                    ON CONFLICT (user_id) DO UPDATE SET lang = EXCLUDED.lang
-                """, user_id, target_lang, user_id)
-            finally:
-                await conn.close()
+            async with aiosqlite.connect("bot_data.db") as db:
+                await db.execute("INSERT OR REPLACE INTO translation_settings (user_id, lang, mode) VALUES (?, ?, (SELECT mode FROM translation_settings WHERE user_id = ?))", (user_id, target_lang, user_id))
+                await db.commit()
             resp = await message.reply("تم تبديل لغتك مثل ماتريد بعد كسي\nشم طيزي فدوه")
             spawn_emoji_task(resp, trigger_by_user_id=user_id)
             bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
@@ -893,14 +817,9 @@ async def universal_handler(message: Message):
 
     if cmd_cleaned == "وضع اللغات" and not is_group and not is_channel:
         if is_all_admins(user_id):
-            conn = await get_db_connection()
-            try:
-                await conn.execute("""
-                    INSERT INTO translation_settings (user_id, lang, mode) VALUES ($1, (SELECT lang FROM translation_settings WHERE user_id = $2), 1)
-                    ON CONFLICT (user_id) DO UPDATE SET mode = 1
-                """, user_id, user_id)
-            finally:
-                await conn.close()
+            async with aiosqlite.connect("bot_data.db") as db:
+                await db.execute("INSERT OR REPLACE INTO translation_settings (user_id, lang, mode) VALUES (?, (SELECT lang FROM translation_settings WHERE user_id = ?), 1)", (user_id, user_id))
+                await db.commit()
             kb_cancel_only = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="الغاء")]], resize_keyboard=True)
             resp = await message.reply("اي شي تكتبه هسه راح اعتبره TrANSLATioN\nوادزلك الكلام بنفس شروطك الكتابيه ولغتك", reply_markup=kb_cancel_only, protect_content=protect)
             spawn_emoji_task(resp, trigger_by_user_id=user_id)
@@ -909,14 +828,9 @@ async def universal_handler(message: Message):
     if cmd_cleaned == "الغاء" and not is_group and not is_channel:
         if is_all_admins(user_id):
             admin_states.pop(user_id, None)
-            conn = await get_db_connection()
-            try:
-                await conn.execute("""
-                    INSERT INTO translation_settings (user_id, lang, mode) VALUES ($1, (SELECT lang FROM translation_settings WHERE user_id = $2), 0)
-                    ON CONFLICT (user_id) DO UPDATE SET mode = 0
-                """, user_id, user_id)
-            finally:
-                await conn.close()
+            async with aiosqlite.connect("bot_data.db") as db:
+                await db.execute("INSERT OR REPLACE INTO translation_settings (user_id, lang, mode) VALUES (?, (SELECT lang FROM translation_settings WHERE user_id = ?), 0)", (user_id, user_id))
+                await db.commit()
             resp = await message.reply("صار وتدلل\nمنو يكدر يعصيك يبعد كسي اه", reply_markup=ReplyKeyboardRemove(), protect_content=protect)
             spawn_emoji_task(resp, trigger_by_user_id=user_id)
             return
@@ -995,13 +909,11 @@ async def universal_handler(message: Message):
             await handle_random_replies(message)
     elif not is_channel:
         if cmd_cleaned and not ANY_URL_REGEX.findall(cmd_cleaned):
-            conn = await get_db_connection()
-            try:
-                t_row = await conn.fetchrow("SELECT lang, mode FROM translation_settings WHERE user_id = $1", user_id)
-            finally:
-                await conn.close()
-            if t_row and t_row['mode'] == 1 and t_row['lang']:
-                formatted_res = await translate_text(cmd_cleaned, t_row['lang'])
+            async with aiosqlite.connect("bot_data.db") as db:
+                async with db.execute("SELECT lang, mode FROM translation_settings WHERE user_id = ?", (user_id,)) as cursor:
+                    t_row = await cursor.fetchone()
+            if t_row and t_row[1] == 1 and t_row[0]:
+                formatted_res = await translate_text(cmd_cleaned, t_row[0])
                 if formatted_res.strip():
                     resp = await message.reply(formatted_res, protect_content=protect)
                     spawn_emoji_task(resp, trigger_by_user_id=user_id)
