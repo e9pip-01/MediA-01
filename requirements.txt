@@ -1,5 +1,5 @@
 aiogram
 yt-dlp
-asyncpg
-google-genai
+aiosqlite
 aiohttp
+google-genai
