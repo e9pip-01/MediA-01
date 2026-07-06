@@ -324,7 +324,8 @@ async def live_typing_reply(message: Message, full_text: str, reply_markup=None,
             
         can_react = True
         if is_group:
-            if not await is_user_admin_or_owner(chat_id, user_id):
+            msg_sender = sent_msg.from_user.id if sent_msg.from_user else 0
+            if msg_sender != bot.id and not await is_user_admin_or_owner(chat_id, msg_sender):
                 can_react = False
                 
         if can_react:
@@ -397,7 +398,8 @@ async def queue_worker():
         
         can_react = True
         if is_group:
-            if not await is_user_admin_or_owner(chat_id, user_id):
+            msg_sender = message.from_user.id if message.from_user else 0
+            if msg_sender != bot.id and not await is_user_admin_or_owner(chat_id, msg_sender):
                 can_react = False
 
         if cached_row:
@@ -761,39 +763,58 @@ async def universal_handler(message: Message):
         return
 
     if message.reply_to_message and cmd_cleaned == "ستيكر":
-        if not is_group or await is_user_admin_or_owner(chat_id, user_id):
-            rep = message.reply_to_message
+        rep = message.reply_to_message
+        target_url = None
+        
+        if rep.document or rep.video or rep.animation:
+            media_obj = rep.document or rep.video or rep.animation
+            fid = media_obj.file_id
+            async with aiosqlite.connect("bot_data.db") as db:
+                async with db.execute("SELECT media_key FROM media_cache WHERE file_id = ?", (fid,)) as cursor:
+                    row = await cursor.fetchone()
+                    if row and row[0].startswith("media_"):
+                        target_url = row[0].replace("media_", "", 1)
+        
+        if not target_url:
             origin_text = rep.text if rep.text else (rep.caption if rep.caption else "")
             all_urls = ANY_URL_REGEX.findall(origin_text)
             downloadable_urls = [url for url in all_urls if "t.me" not in url and "telegram.me" not in url]
-            
             if downloadable_urls:
                 target_url = downloadable_urls[0]
+                
+        if target_url:
+            can_react = True
+            if is_group:
+                msg_sender = message.from_user.id if message.from_user else 0
+                if msg_sender != bot.id and not await is_user_admin_or_owner(chat_id, msg_sender):
+                    can_react = False
+            if can_react:
                 user_emoji = get_smart_reaction(last_user_reaction, chat_id)
                 asyncio.create_task(delayed_react(chat_id, message.message_id, user_emoji))
-                
-                try:
-                    res = await extract_and_download(target_url, no_audio=True)
-                    if res and res[0] and not res[4]:
-                        file_path = res[0]
-                        dynamic_kb = await get_dynamic_media_keyboard(user_id)
-                        
-                        gif_msg = await message.reply_animation(
-                            animation=FSInputFile(file_path), 
-                            reply_markup=dynamic_kb, 
-                            has_spoiler=True, 
-                            protect_content=protect
-                        )
-                        spawn_emoji_task(gif_msg, trigger_by_user_id=user_id)
-                        
+            
+            try:
+                res = await extract_and_download(target_url, no_audio=True)
+                if res and res[0] and not res[4]:
+                    file_path = res[0]
+                    dynamic_kb = await get_dynamic_media_keyboard(user_id)
+                    
+                    gif_msg = await message.reply_animation(
+                        animation=FSInputFile(file_path), 
+                        reply_markup=dynamic_kb, 
+                        has_spoiler=True, 
+                        protect_content=protect
+                    )
+                    spawn_emoji_task(gif_msg, trigger_by_user_id=user_id)
+                    
+                    if can_react:
                         bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
                         asyncio.create_task(delayed_react(chat_id, gif_msg.message_id, bot_emoji))
-                        
-                        try: os.remove(file_path)
-                        except Exception: pass
-                except Exception:
-                    pass
-                return
+                    
+                    try: os.remove(file_path)
+                    except Exception: pass
+            except Exception:
+                pass
+            return
         else:
             if not is_group and not is_channel:
                 await handle_random_replies(message)
@@ -950,15 +971,15 @@ async def universal_handler(message: Message):
         spawn_emoji_task(resp, trigger_by_user_id=user_id)
         return
 
-    if message.text and message.text != "ادت" and message.text not in ["تعيين الرابط", "عرض الزر", "الغاء", "عودة", "قفل النقل", "فتح النقل", "قفل الاشعارات", "فتح الاشعارات", "الاوامر", "عرض المطورين", "عرض مستعملين البوت"]:
-        can_react_on_text = True
-        if is_group:
-            if not await is_user_admin_or_owner(chat_id, user_id):
-                can_react_on_text = False
-                
-        if can_react_on_text:
-            user_emoji = get_smart_reaction(last_user_reaction, chat_id)
-            asyncio.create_task(delayed_react(chat_id, message.message_id, user_emoji))
+    can_react_on_text = True
+    if is_group:
+        msg_sender = message.from_user.id if message.from_user else 0
+        if msg_sender != bot.id and not await is_user_admin_or_owner(chat_id, msg_sender):
+            can_react_on_text = False
+            
+    if can_react_on_text:
+        user_emoji = get_smart_reaction(last_user_reaction, chat_id)
+        asyncio.create_task(delayed_react(chat_id, message.message_id, user_emoji))
 
     content_text = message.text if message.text else (message.caption if message.caption else "")
     all_urls = ANY_URL_REGEX.findall(content_text)
@@ -986,8 +1007,7 @@ async def universal_handler(message: Message):
 
     if is_group:
         if content_text.strip() == "بوت":
-            if await is_user_admin_or_owner(chat_id, user_id, force_update=True):
-                await handle_random_replies(message)
+            await handle_random_replies(message)
     elif not is_channel:
         await handle_random_replies(message)
 
