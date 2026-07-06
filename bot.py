@@ -270,25 +270,16 @@ def analyze_media(info_dict: dict) -> tuple[str, str]:
 async def live_typing_reply(message: Message, full_text: str, reply_markup=None, trigger_emoji_logic: bool = False, parse_mode=None) -> Message:
     lines = full_text.split('\n')
     chunked_lines = []
-    
-    if len(lines) >= 1:
-        words1 = lines[0].split()
-        chunks1 = []
-        i = 0
-        while i < len(words1):
-            chunks1.append(" ".join(words1[i:i+3]))
-            i += 3
-        chunked_lines.append(chunks1)
-        
-    for line in lines[1:]:
+    for line in lines:
         words = line.split()
         chunks = []
         i = 0
         while i < len(words):
-            chunks.append(" ".join(words[i:i+2]))
-            i += 2
+            take = 2
+            chunks.append(" ".join(words[i:i+take]))
+            i += take
         chunked_lines.append(chunks)
-        
+    
     max_chunks = max(len(c) for c in chunked_lines) if chunked_lines else 0
     current_lines = ["" for _ in chunked_lines]
     sent_msg = None
@@ -770,44 +761,8 @@ async def universal_handler(message: Message):
         return
 
     if message.reply_to_message and cmd_cleaned == "ستيكر":
-        rep = message.reply_to_message
-        target_file_id = None
-        
-        if rep.video:
-            target_file_id = rep.video.file_id
-        elif rep.document and rep.document.mime_type and rep.document.mime_type.startswith("video/"):
-            target_file_id = rep.document.file_id
-        elif rep.animation:
-            target_file_id = rep.animation.file_id
-
-        if target_file_id:
-            user_emoji = get_smart_reaction(last_user_reaction, chat_id)
-            asyncio.create_task(delayed_react(chat_id, message.message_id, user_emoji))
-            
-            try:
-                video_file = await bot.get_file(target_file_id)
-                download_path = f"sticker_tmp_{user_id}_{int(time.time())}.mp4"
-                await bot.download_file(video_file.file_path, download_path)
-                
-                if os.path.exists(download_path):
-                    dynamic_kb = await get_dynamic_media_keyboard(user_id)
-                    gif_msg = await message.reply_animation(
-                        animation=FSInputFile(download_path),
-                        reply_markup=dynamic_kb,
-                        has_spoiler=True,
-                        protect_content=protect
-                    )
-                    spawn_emoji_task(gif_msg, trigger_by_user_id=user_id)
-                    
-                    bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
-                    asyncio.create_task(delayed_react(chat_id, gif_msg.message_id, bot_emoji))
-                    
-                    try: os.remove(download_path)
-                    except Exception: pass
-            except Exception:
-                pass
-            return
-        else:
+        if not is_group or await is_user_admin_or_owner(chat_id, user_id):
+            rep = message.reply_to_message
             origin_text = rep.text if rep.text else (rep.caption if rep.caption else "")
             all_urls = ANY_URL_REGEX.findall(origin_text)
             downloadable_urls = [url for url in all_urls if "t.me" not in url and "telegram.me" not in url]
@@ -839,6 +794,10 @@ async def universal_handler(message: Message):
                 except Exception:
                     pass
                 return
+        else:
+            if not is_group and not is_channel:
+                await handle_random_replies(message)
+            return
 
     if is_group:
         is_service = (
@@ -1027,5 +986,25 @@ async def universal_handler(message: Message):
 
     if is_group:
         if content_text.strip() == "بوت":
-            await handle_random_replies(message)
+            if await is_user_admin_or_owner(chat_id, user_id, force_update=True):
+                await handle_random_replies(message)
     elif not is_channel:
+        await handle_random_replies(message)
+
+async def send_startup_notification():
+    for admin_id in PRIMARY_ADMINS:
+        try:
+            protect = await is_content_protected(admin_id)
+            msg = await bot.send_message(chat_id=admin_id, text="اشتغل البوت مرتلخ تاج راسي\nارضع عيرك ؟!", protect_content=protect)
+            spawn_emoji_task(msg, custom_emoji="🧨", trigger_by_user_id=admin_id)
+        except Exception:
+            pass
+
+async def main():
+    await init_db()
+    asyncio.create_task(queue_worker())
+    asyncio.create_task(send_startup_notification())
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
