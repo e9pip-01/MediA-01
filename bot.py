@@ -348,7 +348,7 @@ async def live_typing_progress_reply(message: Message, reply_markup=None, trigge
     is_group = message.chat.type in ["group", "supergroup"]
     user_id = message.from_user.id if message.from_user else 0
     protect = await is_content_protected(chat_id)
-    sent_msg = await message.reply("يتم البدء ب استكشاف طلبك\nسيتم ارسال الميديا الان", protect_content=protect)
+    sent_msg = await message.reply("يتم البدء باستكشاف طلبك...\nسيتم ارسال الميديا الان", protect_content=protect)
     if trigger_emoji_logic:
         active_emoji_tasks[sent_msg.message_id] = None
         spawn_emoji_task(sent_msg, trigger_by_user_id=user_id)
@@ -358,7 +358,7 @@ async def live_typing_progress_reply(message: Message, reply_markup=None, trigge
         percentage += 15
         if percentage > 100:
             percentage = 100
-        visible_text = f"يتم البدня ب استكشاف طلبك\nسيتم ارسال الميديا الان {percentage}%"
+        visible_text = f"يتم البدء باستكشاف طلبك...\nسيتم ارسال الميديا الان {percentage}%"
         try:
             await sent_msg.edit_text(visible_text)
         except Exception:
@@ -383,26 +383,11 @@ async def live_typing_progress_reply(message: Message, reply_markup=None, trigge
 async def extract_and_download(target: str, mute_audio: bool = False):
     loop = asyncio.get_event_loop()
     fmt = 'bestvideo/best' if mute_audio else 'bestvideo+bestaudio/best'
-    brave_headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Sec-Ch-Ua': '"Not/A)Brand";v="8", "Chromium";v="126", "Brave";v="126"',
-        'Sec-Ch-Ua-Mobile': '?0',
-        'Sec-Ch-Ua-Platform': '"Windows"',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-        'Sec-Fetch-User': '?1',
-        'Upgrade-Insecure-Requests': '1'
-    }
     ydl_opts = {
         'format': fmt, 
         'outtmpl': '%(uploader)s_tmp.%(ext)s', 
         'noplaylist': True, 
-        'quiet': True,
-        'http_headers': brave_headers,
-        'impersonate': 'chrome'
+        'quiet': True
     }
     search_target = target
     def sync_download():
