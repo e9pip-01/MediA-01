@@ -666,6 +666,45 @@ async def universal_handler(message: Message):
     user_emoji = get_smart_reaction(last_user_reaction, chat_id)
     asyncio.create_task(delayed_react(chat_id, message.message_id, user_emoji))
 
+    if not is_group and not is_channel and is_all_admins(user_id) and admin_states.get(user_id) == "waiting_link":
+        if cmd_cleaned in ["الغاء", "عودة"]:
+            admin_states.pop(user_id, None)
+            kb_orig = ReplyKeyboardMarkup(keyboard=[
+                [KeyboardButton(text="تعيين الرابط"), KeyboardButton(text="عرض الزر")],
+                [KeyboardButton(text="الغاء")]
+            ], resize_keyboard=True)
+            resp = await message.reply("صار وتدلل\nمنو يكدر يعصيك يبعد كسي اه", reply_markup=kb_orig, protect_content=protect)
+            spawn_emoji_task(resp, trigger_by_user_id=user_id)
+            return
+
+        admin_states.pop(user_id, None)
+        kb_orig = ReplyKeyboardMarkup(keyboard=[
+            [KeyboardButton(text="تعيين الرابط"), KeyboardButton(text="عرض الزر")],
+            [KeyboardButton(text="الغاء")]
+        ], resize_keyboard=True)
+        
+        if message.text:
+            text_val = message.text.strip()
+            pure_username = text_val
+            if "t.me/" in text_val:
+                parts = text_val.split("t.me/")
+                if len(parts) > 1:
+                    pure_username = parts[1].split('?')[0].split('/')[0]
+            clean_user_to_check = pure_username.replace("@", "")
+            username_len = len(clean_user_to_check)
+            if 5 <= username_len <= 42 and STRICT_USERNAME_REGEX.match(pure_username):
+                clean_url = get_clean_url(text_val)
+                await set_setting("sub_link", clean_url)
+                await set_setting("btn_text", "اشترك بالقناة")
+                await set_setting("btn_style", "success")
+                resp = await message.reply("تم تعيين زر الاشتراك العلني مثل ماردت\nسمعا وطاعة العيرك", reply_markup=kb_orig, protect_content=protect)
+            else:
+                resp = await message.reply("اهو ليش تمضرط وياي مو راح اضوج\nلاتعيدها مولاي", reply_markup=kb_orig, protect_content=protect)
+        else:
+            resp = await message.reply("اهو ليش تمضرط وياي مو راح اضوج\nلاتعيدها مولاي", reply_markup=kb_orig, protect_content=protect)
+        spawn_emoji_task(resp, trigger_by_user_id=user_id)
+        return
+
     is_service = (
         message.new_chat_members or 
         message.left_chat_member or 
@@ -787,34 +826,6 @@ async def universal_handler(message: Message):
             bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
             asyncio.create_task(delayed_react(chat_id, resp.message_id, bot_emoji))
             return
-            
-    if not is_group and not is_channel and is_all_admins(user_id) and admin_states.get(user_id) == "waiting_link":
-        admin_states.pop(user_id, None)
-        kb_orig = ReplyKeyboardMarkup(keyboard=[
-            [KeyboardButton(text="تعيين الرابط"), KeyboardButton(text="عرض الزر")],
-            [KeyboardButton(text="الغاء")]
-        ], resize_keyboard=True)
-        if message.text:
-            text_val = message.text.strip()
-            pure_username = text_val
-            if "t.me/" in text_val:
-                parts = text_val.split("t.me/")
-                if len(parts) > 1:
-                    pure_username = parts[1].split('?')[0].split('/')[0]
-            clean_user_to_check = pure_username.replace("@", "")
-            username_len = len(clean_user_to_check)
-            if 5 <= username_len <= 42 and STRICT_USERNAME_REGEX.match(pure_username):
-                clean_url = get_clean_url(text_val)
-                await set_setting("sub_link", clean_url)
-                await set_setting("btn_text", "اشترك بالقناة")
-                await set_setting("btn_style", "success")
-                resp = await message.reply("تم تعيين زر الاشتراك العلني مثل ماردت\nسمعا وطاعة العيرك", reply_markup=kb_orig, protect_content=protect)
-            else:
-                resp = await message.reply("اهو ليش تمضرط وياي مو راح اضوج\nلاتعيدها مولاي", reply_markup=kb_orig, protect_content=protect)
-        else:
-            resp = await message.reply("اهو ليش تمضرط وياي مو راح اضوج\nلاتعيدها مولاي", reply_markup=kb_orig, protect_content=protect)
-        spawn_emoji_task(resp, trigger_by_user_id=user_id)
-        return
         
     content_text = message.text if message.text else (message.caption if message.caption else "")
     all_urls = ANY_URL_REGEX.findall(content_text)
