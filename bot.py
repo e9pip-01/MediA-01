@@ -687,42 +687,6 @@ async def admin_cmd(message: Message):
         if message.chat.type not in ["group", "supergroup", "channel"]:
             await handle_random_replies(message)
 
-@dp.callback_query(F.data.startswith("show_cmds:"))
-async def show_commands_callback(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    creator_id = int(callback.data.split(":")[1])
-    if user_id != creator_id:
-        await callback.answer("شكد طفل وشكد منيوج نعلعلا ابوك\nونعلعلا نيج امك ياسكط", show_alert=True)
-        return
-    cmds_text = (
-        "قفل / النقل \n"
-        "فتح / الاشعارات \n"
-    )
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="مسح", callback_data=f"delete_panel:{creator_id}", style="danger")]
-    ])
-    try:
-        await callback.message.edit_text(text=cmds_text, reply_markup=kb)
-        spawn_emoji_task(callback.message, trigger_by_user_id=user_id)
-        bot_emoji = get_smart_reaction(last_bot_reaction, callback.message.chat.id)
-        asyncio.create_task(delayed_react(callback.message.chat.id, callback.message.message_id, bot_emoji))
-    except Exception:
-        pass
-    await callback.answer(cache_time=0)
-
-@dp.callback_query(F.data.startswith("delete_panel:"))
-async def delete_panel_callback(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    creator_id = int(callback.data.split(":")[1])
-    if user_id != creator_id:
-        await callback.answer("شكد طفل وشكد منيوج نعلعلا ابوك\nونعلعلا نيج امك ياسكط", show_alert=True)
-        return
-    try:
-        await callback.message.delete()
-    except Exception:
-        pass
-    await callback.answer(cache_time=0)
-
 @dp.message()
 @dp.channel_post()
 async def universal_handler(message: Message):
@@ -887,19 +851,6 @@ async def universal_handler(message: Message):
             except Exception:
                 pass
             return
-                        
-    if cmd_cleaned == "الاوامر":
-        if is_all_admins(user_id) or (is_group and await is_user_owner(chat_id, user_id)) or is_channel or (not is_group and not is_channel):
-            kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="قفل / فتح", callback_data=f"show_cmds:{user_id}", style="primary")],
-                [InlineKeyboardButton(text="مسح", callback_data=f"delete_panel:{user_id}", style="danger")]
-            ])
-            resp = await message.reply("الاوامر والتعليمات", reply_markup=kb, protect_content=protect)
-            spawn_emoji_task(resp, trigger_by_user_id=user_id)
-        else:
-            if not is_group and not is_channel:
-                await handle_random_replies(message)
-        return
         
     if cmd_cleaned in ["قفل الاشعارات", "فتح الاشعارات"]:
         if is_group or is_channel or (not is_group and not is_channel):
@@ -968,8 +919,8 @@ async def universal_handler(message: Message):
                 spawn_emoji_task(resp, reply_markup=kb_second_page, trigger_by_user_id=user_id)
             return
 
-    if cmd_cleaned == "الاوامر" and not is_group and not is_channel:
-        if is_all_admins(user_id):
+    if cmd_cleaned == "الاوامر":
+        if is_all_admins(user_id) or (is_group and await is_user_owner(chat_id, user_id)) or is_channel or (not is_group and not is_channel):
             async with aiosqlite.connect("bot_data.db") as db:
                 async with db.execute("SELECT command_name FROM custom_commands") as cursor:
                     custom_rows = await cursor.fetchall()
@@ -1000,10 +951,13 @@ async def universal_handler(message: Message):
             resp = await message.reply(selected, reply_markup=kb_cmds, protect_content=protect)
             bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
             asyncio.create_task(delayed_react(chat_id, resp.message_id, bot_emoji))
-            return
+        else:
+            if not is_group and not is_channel:
+                await handle_random_replies(message)
+        return
 
-    if cmd_cleaned == "الصفحة الثانية" and not is_group and not is_channel:
-        if is_all_admins(user_id):
+    if cmd_cleaned == "الصفحة الثانية":
+        if is_all_admins(user_id) or (is_group and await is_user_owner(chat_id, user_id)) or is_channel or (not is_group and not is_channel):
             async with aiosqlite.connect("bot_data.db") as db:
                 async with db.execute("SELECT command_name FROM custom_commands") as cursor:
                     custom_rows = await cursor.fetchall()
@@ -1078,8 +1032,8 @@ async def universal_handler(message: Message):
             spawn_emoji_task(resp, trigger_by_user_id=user_id)
             return
             
-    if cmd_cleaned == "عودة" and not is_group and not is_channel:
-        if is_all_admins(user_id):
+    if cmd_cleaned == "عودة":
+        if is_all_admins(user_id) or (is_group and await is_user_owner(chat_id, user_id)) or is_channel or (not is_group and not is_channel):
             admin_states.pop(user_id, None)
             kb_orig = ReplyKeyboardMarkup(keyboard=[
                 [KeyboardButton(text="تعيين الرابط"), KeyboardButton(text="عرض الزر")],
