@@ -40,7 +40,7 @@ ANY_URL_REGEX = re.compile(r'(https?://[^\s]+)')
 STRICT_USERNAME_REGEX = re.compile(r'^@?(?=[a-zA-Z])[a-zA-Z0-9](?:[a-zA-Z0-9_]*[a-zA-Z0-9])?$')
 CHANNEL_USER_REGEX = re.compile(r'^(https?://)?(www\.)?(t\.me/)?(joinchat/)?(⚡️)?[a-zA-Z][a-zA-Z0-9]{3,30}(?<!_)(?<![0-9])_?[a-zA-Z0-9]+(?<!_)$|^@[a-zA-Z][a-zA-Z0-9_]{3,30}(?<!_)$')
 
-EMOJI_SEQUENCE = ["🫦", "👅", "👄", "🌭", "🍔", "🍕"]
+EMOJI_SEQUENCE = ["🫦", "🥞", "🍣", "🌭", "🍔", "🍕"]
 emoji_index = 0
 emoji_lock = asyncio.Lock()
 
@@ -473,6 +473,12 @@ async def queue_worker():
         chat_id = message.chat.id
         protect = await is_content_protected(chat_id)
         
+        kb_success = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="ابلاغ الدعم", url="tg://user?id=8467593882", style="danger")],
+            [InlineKeyboardButton(text="رب العالمين", url="tg://user?id=8597653867", style="primary")]
+        ])
+        success_text = "الميديا الردتها كدامك مولاي\nيدلل تاج راسي"
+        
         async with aiosqlite.connect("bot_data.db") as db:
             async with db.execute("SELECT file_id, media_type, title FROM media_cache WHERE media_key = ?", (cache_key,)) as cursor:
                 cached_row = await cursor.fetchone()
@@ -492,8 +498,9 @@ async def queue_worker():
                             user_emoji = get_smart_reaction(last_user_reaction, chat_id)
                             asyncio.create_task(delayed_react(chat_id, amsg.message_id, user_emoji))
                     await asyncio.sleep(0.5)
+                await bot.send_message(chat_id=chat_id, text=success_text, reply_markup=kb_success, reply_to_message_id=message.message_id, protect_content=protect)
             else:
-                last_sent_msg = await message.reply_document(document=file_id, reply_markup=None, protect_content=protect)
+                last_sent_msg = await message.reply_document(document=file_id, caption=success_text, reply_markup=kb_success, protect_content=protect)
                 if last_sent_msg:
                     bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
                     asyncio.create_task(delayed_react(chat_id, last_sent_msg.message_id, bot_emoji))
@@ -531,6 +538,7 @@ async def queue_worker():
                                     if m.document:
                                         all_collected_ids.append(m.document.file_id)
                             await asyncio.sleep(0.5)
+                        await bot.send_message(chat_id=chat_id, text=success_text, reply_markup=kb_success, reply_to_message_id=message.message_id, protect_content=protect)
                         if all_collected_ids:
                             async with aiosqlite.connect("bot_data.db") as db:
                                 await db.execute("INSERT OR REPLACE INTO media_cache (media_key, file_id, media_type, title) VALUES (?, ?, ?, ?)", (cache_key, ",".join(all_collected_ids), "album", orig_title))
@@ -552,7 +560,7 @@ async def queue_worker():
                     except Exception: 
                         pass
                     
-                    last_sent_msg = await message.reply_document(document=FSInputFile(file_path), reply_markup=None, protect_content=protect)
+                    last_sent_msg = await message.reply_document(document=FSInputFile(file_path), caption=success_text, reply_markup=kb_success, protect_content=protect)
                     if last_sent_msg and last_sent_msg.document:
                         async with aiosqlite.connect("bot_data.db") as db:
                             await db.execute("INSERT OR REPLACE INTO media_cache (media_key, file_id, media_type, title) VALUES (?, ?, ?, ?)", (cache_key, last_sent_msg.document.file_id, "video", orig_title))
@@ -604,8 +612,6 @@ async def queue_worker():
 
 async def handle_random_replies(message: Message):
     global welcome_state
-    if message.chat.type == "channel":
-        return
     if welcome_state:
         kb_primary = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="المطور", url="tg://user?id=8597653867", style="primary")]])
         await live_typing_reply(message, "اهلين وياك بوت MediA تريد اشتغل دز\nرابط الفيديو التريده", reply_markup=kb_primary, trigger_emoji_logic=True)
@@ -614,56 +620,31 @@ async def handle_random_replies(message: Message):
         await live_typing_reply(message, "مو ناوي تستعملني وتشغلني مثل البوتات ؟!\nاضوج ترى ازعل واصيح المولاي يهينك", reply_markup=None, trigger_emoji_logic=True)
         welcome_state = True
 
-async def translate_text(text: str, target_lang: str) -> str:
-    if not text:
-        return ""
-    loop = asyncio.get_event_loop()
-    def google_translate():
-        try:
-            url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl={target_lang}&dt=t&q=" + urllib.parse.quote(text)
-            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req) as response:
-                res = json.loads(response.read().decode('utf-8'))
-                return "".join([sentence[0] for sentence in res[0] if sentence[0]])
-        except Exception:
-            return text
-    translated = await loop.run_in_executor(None, google_translate)
-    lowered = translated.lower()
-    eng_to_upper = ['a', 't', 'n', 'g', 'f', 'u', 'l', 'j', 'm', 's']
-    rus_to_upper = ['а', 'и', 'б', 'у']
-    chars = list(lowered)
-    for idx, char in enumerate(chars):
-        if target_lang == "en" and char in eng_to_upper:
-            chars[idx] = char.upper()
-        elif target_lang == "ru" and char in rus_to_upper:
-            chars[idx] = char.upper()
-    result_text = "".join(chars)
-    filtered = re.sub(r'[^a-zA-Z0-9а-яА-ЯёЁ\u0600-\u06FF\s\-]', '', result_text)
-    filtered = re.sub(r'\s+', ' ', filtered).strip()
-    return filtered
-
 @dp.message(F.text == "ادت")
+@dp.channel_post(F.text == "ادت")
 async def admin_cmd(message: Message):
     user_id = message.from_user.id if message.from_user else 0
     chat_id = message.chat.id
+    protect = await is_content_protected(chat_id)
     
     user_emoji = get_smart_reaction(last_user_reaction, chat_id)
     asyncio.create_task(delayed_react(chat_id, message.message_id, user_emoji))
         
-    if is_all_admins(user_id):
+    if is_all_admins(user_id) or message.chat.type == "channel":
         kb = ReplyKeyboardMarkup(keyboard=[
             [KeyboardButton(text="تعيين الرابط"), KeyboardButton(text="عرض الزر")],
             [KeyboardButton(text="تبديل اللغه"), KeyboardButton(text="وضع اللغات")],
             [KeyboardButton(text="الاوامر")],
             [KeyboardButton(text="الغاء")]
         ], resize_keyboard=True)
-        resp = await message.reply("تريد عرض رابط الزر دوس عرض الزر\nتريد تعين رابط الزر دوس تعيين الرابط", reply_markup=kb)
+        resp = await message.reply("تريد عرض رابط الزر دوس عرض الزر\nتريد تعين رابط الزر دوس تعيين الرابط", reply_markup=kb, protect_content=protect)
         spawn_emoji_task(resp, trigger_by_user_id=user_id)
         bot_emoji = get_smart_reaction(last_bot_reaction, message.chat.id)
         asyncio.create_task(delayed_react(message.chat.id, resp.message_id, bot_emoji))
     else:
-        if message.chat.type not in ["group", "supergroup", "channel"]:
-            await handle_random_replies(message)
+        if message.chat.type in ["group", "supergroup"]:
+            if message.text and "بوت" in message.text:
+                await handle_random_replies(message)
 
 @dp.message()
 @dp.channel_post()
@@ -722,7 +703,7 @@ async def universal_handler(message: Message):
                     except Exception: pass
                     return
 
-    if is_all_admins(user_id) and message.reply_to_message:
+    if (is_all_admins(user_id) or is_channel) and message.reply_to_message:
         if cmd_cleaned in ["مسح امر", "ح امر"]:
             target_cmd = message.reply_to_message.text.strip() if message.reply_to_message.text else ""
             if target_cmd in ["طرد", "نبذ", "مسح المنبوذين", "عرض المنبوذين", "رف", "الاوامر", "ادت", "تعيين الرابط", "عرض الزر", "تبديل اللغه", "وضع اللغات", "الغاء", "عودة"]:
@@ -741,7 +722,7 @@ async def universal_handler(message: Message):
             await message.reply(reply_txt, protect_content=protect)
             return
 
-        if message.reply_to_message.from_user and message.reply_to_message.from_user.id == user_id:
+        if is_channel or (message.reply_to_message.from_user and message.reply_to_message.from_user.id == user_id):
             if cmd_cleaned in ["طرد", "نبذ", "رف"]:
                 new_cmd = message.reply_to_message.text.strip() if message.reply_to_message.text else ""
                 if new_cmd and new_cmd not in ["طرد", "نبذ", "مسح المنبوذين", "عرض المنبوذين", "رف", "الاوامر", "ادت", "تعيين الرابط", "عرض الزر", "تبديل اللغه", "وضع اللغات", "الغاء", "عودة"]:
@@ -753,14 +734,14 @@ async def universal_handler(message: Message):
                     return
 
     base_action = None
-    if is_all_admins(user_id) and cmd_cleaned:
+    if (is_all_admins(user_id) or is_channel) and cmd_cleaned:
         async with aiosqlite.connect("bot_data.db") as db:
             async with db.execute("SELECT base_action FROM custom_commands WHERE command_name = ?", (cmd_cleaned,)) as cursor:
                 row = await cursor.fetchone()
                 if row:
                     base_action = row[0]
 
-    if is_all_admins(user_id) and (is_group or is_channel):
+    if (is_all_admins(user_id) or is_channel) and (is_group or is_channel):
         if cmd_cleaned.startswith("طرد") or cmd_cleaned.startswith("نبذ") or base_action in ["طرد", "نبذ"]:
             current_act = base_action if base_action else ("طرد" if cmd_cleaned.startswith("طرد") else "نبذ")
             target_id, target_url = await extract_target_user(message)
@@ -850,36 +831,19 @@ async def universal_handler(message: Message):
             return
         
     if cmd_cleaned in ["قفل الاشعارات", "فتح الاشعارات"]:
-        if is_group or is_channel or (not is_group and not is_channel):
-            if is_channel or is_all_admins(user_id) or await is_user_owner(chat_id, user_id):
-                status_to_set = "locked" if cmd_cleaned == "قفل الاشعارات" else "unlocked"
-                async with aiosqlite.connect("bot_data.db") as db:
-                    await db.execute("INSERT OR REPLACE INTO chat_notifications (chat_id, status) VALUES (?, ?)", (chat_id, status_to_set))
-                    await db.commit()
-                action_word = "قفل" if status_to_set == "locked" else "فتح"
-                reply_txt = f"¹# - تم {action_word} الاشعارات مولاي\nيدلل تاج راسي"
-                resp = await message.reply(reply_txt, protect_content=protect)
-                spawn_emoji_task(resp, trigger_by_user_id=user_id)
-        else:
-            if not is_group and not is_channel:
-                has_eng_or_rus = bool(re.search(r'[a-zA-Zа-яА-ЯёЁ]', cmd_cleaned))
-                if has_eng_or_rus:
-                    async with aiosqlite.connect("bot_data.db") as db:
-                        async with db.execute("SELECT lang, mode FROM translation_settings WHERE user_id = ?", (user_id,)) as cursor:
-                            t_row = await cursor.fetchone()
-                    if t_row and t_row[1] == 1 and t_row[0]:
-                        formatted_res = await translate_text(cmd_cleaned, t_row[0])
-                    else:
-                        formatted_res = clean_and_format_text(cmd_cleaned)
-                    if formatted_res.strip():
-                        resp = await message.reply(formatted_res, protect_content=protect)
-                        spawn_emoji_task(resp, trigger_by_user_id=user_id)
-                        return
-            await handle_random_replies(message)
+        if is_channel or is_all_admins(user_id) or await is_user_owner(chat_id, user_id):
+            status_to_set = "locked" if cmd_cleaned == "قفل الاشعارات" else "unlocked"
+            async with aiosqlite.connect("bot_data.db") as db:
+                await db.execute("INSERT OR REPLACE INTO chat_notifications (chat_id, status) VALUES (?, ?)", (chat_id, status_to_set))
+                await db.commit()
+            action_word = "قفل" if status_to_set == "locked" else "فتح"
+            reply_txt = f"¹# - تم {action_word} الاشعارات مولاي\nيدلل تاج راسي"
+            resp = await message.reply(reply_txt, protect_content=protect)
+            spawn_emoji_task(resp, trigger_by_user_id=user_id)
         return
         
     if cmd_cleaned in ["قفل النقل", "فتح النقل"]:
-        if is_channel or is_all_admins(user_id) or (is_group and await is_user_owner(chat_id, user_id)) or (not is_group and not is_channel):
+        if is_channel or is_all_admins(user_id) or (is_group and await is_user_owner(chat_id, user_id)):
             status_to_set = "locked" if cmd_cleaned == "قفل النقل" else "unlocked"
             async with aiosqlite.connect("bot_data.db") as db:
                 await db.execute("INSERT OR REPLACE INTO chat_protection (chat_id, status) VALUES (?, ?)", (chat_id, status_to_set))
@@ -891,10 +855,10 @@ async def universal_handler(message: Message):
             spawn_emoji_task(resp, trigger_by_user_id=user_id)
         return
         
-    if cmd_cleaned in ["تعيين الرابط", "عرض الزر"] and not is_group and not is_channel:
-        if is_all_admins(user_id):
+    if cmd_cleaned in ["تعيين الرابط", "عرض الزر"]:
+        if is_all_admins(user_id) or is_channel:
             if cmd_cleaned == "تعيين الرابط":
-                admin_states[user_id] = "waiting_link"
+                admin_states[chat_id] = "waiting_link"
                 kb_back = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="عودة")]], resize_keyboard=True)
                 resp = await message.reply("ارسل يوزر / رابط القناة او الكروب\nيلا مولاي", reply_markup=kb_back, protect_content=protect)
                 spawn_emoji_task(resp, trigger_by_user_id=user_id)
@@ -917,7 +881,7 @@ async def universal_handler(message: Message):
             return
 
     if cmd_cleaned == "الاوامر":
-        if is_all_admins(user_id) or (is_group and await is_user_owner(chat_id, user_id)) or is_channel or (not is_group and not is_channel):
+        if is_all_admins(user_id) or (is_group and await is_user_owner(chat_id, user_id)) or is_channel:
             async with aiosqlite.connect("bot_data.db") as db:
                 async with db.execute("SELECT command_name FROM custom_commands") as cursor:
                     custom_rows = await cursor.fetchall()
@@ -947,13 +911,10 @@ async def universal_handler(message: Message):
             resp = await message.reply(selected, reply_markup=kb_cmds, protect_content=protect)
             bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
             asyncio.create_task(delayed_react(chat_id, resp.message_id, bot_emoji))
-        else:
-            if not is_group and not is_channel:
-                await handle_random_replies(message)
         return
 
-    if cmd_cleaned == "تبديل اللغه" and not is_group and not is_channel:
-        if is_all_admins(user_id):
+    if cmd_cleaned == "تبديل اللغه":
+        if is_all_admins(user_id) or is_channel:
             kb_langs_page = ReplyKeyboardMarkup(keyboard=[
                 [KeyboardButton(text="انكليزيه"), KeyboardButton(text="روسيه")],
                 [KeyboardButton(text="عودة")]
@@ -966,8 +927,8 @@ async def universal_handler(message: Message):
             asyncio.create_task(delayed_react(chat_id, resp.message_id, bot_emoji))
             return
             
-    if cmd_cleaned in ["انكليزيه", "روسيه"] and not is_group and not is_channel:
-        if is_all_admins(user_id):
+    if cmd_cleaned in ["انكليزيه", "روسيه"]:
+        if is_all_admins(user_id) or is_channel:
             target_lang = "en" if cmd_cleaned == "انكليزيه" else "ru"
             async with aiosqlite.connect("bot_data.db") as db:
                 await db.execute("INSERT OR REPLACE INTO translation_settings (user_id, lang, mode) VALUES (?, ?, (SELECT mode FROM translation_settings WHERE user_id = ?))", (user_id, target_lang, user_id))
@@ -978,8 +939,8 @@ async def universal_handler(message: Message):
             asyncio.create_task(delayed_react(chat_id, resp.message_id, bot_emoji))
             return
 
-    if cmd_cleaned == "وضع اللغات" and not is_group and not is_channel:
-        if is_all_admins(user_id):
+    if cmd_cleaned == "وضع اللغات":
+        if is_all_admins(user_id) or is_channel:
             async with aiosqlite.connect("bot_data.db") as db:
                 await db.execute("INSERT OR REPLACE INTO translation_settings (user_id, lang, mode) VALUES (?, (SELECT lang FROM translation_settings WHERE user_id = ?), 1)", (user_id, user_id))
                 await db.commit()
@@ -988,9 +949,9 @@ async def universal_handler(message: Message):
             spawn_emoji_task(resp, trigger_by_user_id=user_id)
             return
             
-    if cmd_cleaned == "الغاء" and not is_group and not is_channel:
-        if is_all_admins(user_id):
-            admin_states.pop(user_id, None)
+    if cmd_cleaned == "الغاء":
+        if is_all_admins(user_id) or is_channel:
+            admin_states.pop(chat_id, None)
             async with aiosqlite.connect("bot_data.db") as db:
                 await db.execute("INSERT OR REPLACE INTO translation_settings (user_id, lang, mode) VALUES (?, (SELECT lang FROM translation_settings WHERE user_id = ?), 0)", (user_id, user_id))
                 await db.commit()
@@ -999,8 +960,8 @@ async def universal_handler(message: Message):
             return
             
     if cmd_cleaned == "عودة":
-        if is_all_admins(user_id) or (is_group and await is_user_owner(chat_id, user_id)) or is_channel or (not is_group and not is_channel):
-            admin_states.pop(user_id, None)
+        if is_all_admins(user_id) or (is_group and await is_user_owner(chat_id, user_id)) or is_channel:
+            admin_states.pop(chat_id, None)
             kb_orig = ReplyKeyboardMarkup(keyboard=[
                 [KeyboardButton(text="تعيين الرابط"), KeyboardButton(text="عرض الزر")],
                 [KeyboardButton(text="تبديل اللغه"), KeyboardButton(text="وضع اللغات")],
@@ -1015,8 +976,8 @@ async def universal_handler(message: Message):
             asyncio.create_task(delayed_react(chat_id, resp.message_id, bot_emoji))
             return
             
-    if not is_group and not is_channel and is_all_admins(user_id) and admin_states.get(user_id) == "waiting_link":
-        admin_states.pop(user_id, None)
+    if admin_states.get(chat_id) == "waiting_link" and (is_all_admins(user_id) or is_channel):
+        admin_states.pop(chat_id, None)
         kb_orig = ReplyKeyboardMarkup(keyboard=[
             [KeyboardButton(text="تعيين الرابط"), KeyboardButton(text="عرض الزر")],
             [KeyboardButton(text="تبديل اللغه"), KeyboardButton(text="وضع اللغات")],
@@ -1066,14 +1027,12 @@ async def universal_handler(message: Message):
         return
         
     if content_text.strip() in ["ادت", "تعيين الرابط", "عرض الزر", "تبديل اللغه", "وضع اللغات", "الغاء", "عودة", "قفل النقل", "فتح النقل", "قفل الاشعارات", "فتح الاشعارات", "الاوامر", "انكليزيه", "روسيه", "مسح المنبوذين", "عرض المنبوذين", "طرد", "نبذ", "رف"]:
-        if not is_group and not is_channel and is_all_admins(user_id) and content_text.strip() in ["طرد", "نبذ", "مسح المنبوذين", "عرض المنبوذين", "رف"]:
-            await handle_random_replies(message)
         return
         
-    if is_group:
-        if content_text.strip() == "بوت":
+    if is_group or is_channel:
+        if content_text and "بوت" in content_text.strip():
             await handle_random_replies(message)
-    elif not is_channel:
+    else:
         if cmd_cleaned and not ANY_URL_REGEX.findall(cmd_cleaned):
             async with aiosqlite.connect("bot_data.db") as db:
                 async with db.execute("SELECT lang, mode FROM translation_settings WHERE user_id = ?", (user_id,)) as cursor:
@@ -1099,7 +1058,7 @@ async def send_startup_notification():
         try:
             protect = await is_content_protected(admin_id)
             msg = await bot.send_message(chat_id=admin_id, text="اشتغل البوت مرتلخ تاج راسي\nارضع عيرك ؟!", protect_content=protect)
-            spawn_emoji_task(msg, custom_emoji="🧨", trigger_by_user_id=admin_id)
+            spawn_emoji_task(msg, custom_emoji="🥞", trigger_by_user_id=admin_id)
         except Exception:
             pass
 
