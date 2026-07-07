@@ -391,7 +391,7 @@ async def live_typing_progress_reply_init(message: Message, trigger_emoji_logic:
     chat_id = message.chat.id
     user_id = message.from_user.id if message.from_user else 0
     protect = await is_content_protected(chat_id)
-    sent_msg = await message.reply("يتم البدء باستكشاف طلبك...\nسيتم ارسال الميديا الان", protect_content=protect)
+    sent_msg = await message.reply("يتم البدء باستكشاف طلبك\nسيتم ارسال الميديا الان", protect_content=protect)
     if trigger_emoji_logic:
         active_emoji_tasks[sent_msg.message_id] = None
         spawn_emoji_task(sent_msg, trigger_by_user_id=user_id)
