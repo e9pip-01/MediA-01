@@ -387,7 +387,7 @@ async def live_typing_reply(message: Message, full_text: str, reply_markup=None,
         asyncio.create_task(delayed_react(chat_id, sent_msg.message_id, user_emoji))
     return sent_msg
 
-async def live_typing_progress_reply(message: Message, reply_markup=None, trigger_emoji_logic: bool = False) -> Message:
+async def live_typing_progress_reply_init(message: Message, trigger_emoji_logic: bool = False) -> Message:
     chat_id = message.chat.id
     user_id = message.from_user.id if message.from_user else 0
     protect = await is_content_protected(chat_id)
@@ -396,32 +396,15 @@ async def live_typing_progress_reply(message: Message, reply_markup=None, trigge
         active_emoji_tasks[sent_msg.message_id] = None
         spawn_emoji_task(sent_msg, trigger_by_user_id=user_id)
     await asyncio.sleep(0.3)
-    percentage = 0
-    while percentage < 100:
-        percentage += 15
-        if percentage > 100:
-            percentage = 100
-        visible_text = f"يتم البدء باستكشاف طلبك...\nسيتم ارسال الميديا الان {percentage}%"
-        try:
-            await sent_msg.edit_text(visible_text)
-        except Exception:
-            pass
-        await asyncio.sleep(0.3)
-    if reply_markup:
-        try:
-            await sent_msg.edit_reply_markup(reply_markup=reply_markup)
-        except Exception:
-            pass
-    if sent_msg.message_id in active_emoji_tasks:
-        face_msg = active_emoji_tasks.pop(sent_msg.message_id, None)
-        if face_msg:
-            try: await face_msg.delete()
-            except Exception: pass
+    return sent_msg
+
+async def update_progress_percentage(sent_msg: Message, percentage: int):
+    if not sent_msg: return
     try:
-        await sent_msg.delete()
+        visible_text = f"يتم البدء باستكشاف طلبك...\nسيتم ارسال الميديا الان {percentage}%"
+        await sent_msg.edit_text(visible_text)
     except Exception:
         pass
-    return None
 
 async def extract_and_download(target: str, mute_audio: bool = False):
     loop = asyncio.get_event_loop()
@@ -430,7 +413,22 @@ async def extract_and_download(target: str, mute_audio: bool = False):
         'format': fmt, 
         'outtmpl': '%(uploader)s_tmp.%(ext)s', 
         'noplaylist': True, 
-        'quiet': True
+        'quiet': True,
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': 'en-US,en;q=0.9,ar;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Sec-Ch-Ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1',
+            'Connection': 'keep-alive'
+        }
     }
     search_target = target
     def sync_download():
@@ -473,26 +471,21 @@ async def queue_worker():
     while True:
         message, target, user_id, cache_key = await download_queue.get()
         chat_id = message.chat.id
-        
         protect = await is_content_protected(chat_id)
         
         async with aiosqlite.connect("bot_data.db") as db:
             async with db.execute("SELECT file_id, media_type, title FROM media_cache WHERE media_key = ?", (cache_key,)) as cursor:
                 cached_row = await cursor.fetchone()
         
-        success_text = "الميديا الردتها كدامك مولاي\nيدلل تاج راسي"
-        
         if cached_row:
             file_id, media_type, title = cached_row
-            last_sent_msg = None
             if media_type == "album":
                 file_ids = file_id.split(",")
                 chunks = [file_ids[i:i + 8] for i in range(0, len(file_ids), 8)]
-                for i, chunk in enumerate(chunks):
+                for chunk in chunks:
                     media_group = [InputMediaDocument(media=fid) for fid in chunk]
                     album_msgs = await message.reply_media_group(media=media_group, protect_content=protect)
                     if album_msgs:
-                        last_sent_msg = album_msgs[0]
                         for amsg in album_msgs:
                             bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
                             asyncio.create_task(delayed_react(chat_id, amsg.message_id, bot_emoji))
@@ -506,28 +499,30 @@ async def queue_worker():
                     asyncio.create_task(delayed_react(chat_id, last_sent_msg.message_id, bot_emoji))
                     user_emoji = get_smart_reaction(last_user_reaction, chat_id)
                     asyncio.create_task(delayed_react(chat_id, last_sent_msg.message_id, user_emoji))
-            
-            if last_sent_msg:
-                download_queue.task_done()
-                continue
+            download_queue.task_done()
+            continue
                 
-        status_msg = await live_typing_progress_reply(message, reply_markup=None, trigger_emoji_logic=True)
+        status_msg = await live_typing_progress_reply_init(message, trigger_emoji_logic=True)
+        await update_progress_percentage(status_msg, 25)
+        
         file_path = None
         is_img_type = False
         try:
             res = await extract_and_download(target, mute_audio=False)
+            await update_progress_percentage(status_msg, 65)
+            
             if res and res[0]:
                 file_path, orig_title, uploader, media_id, is_img_type, actual_ext = res
-                last_sent_msg = None
+                await update_progress_percentage(status_msg, 100)
+                
                 if is_img_type:
                     if isinstance(file_path, list):
                         chunks = [file_path[i:i + 8] for i in range(0, len(file_path), 8)]
                         all_collected_ids = []
-                        for i, chunk in enumerate(chunks):
+                        for chunk in chunks:
                             media_group = [InputMediaDocument(media=FSInputFile(fp)) for fp in chunk]
                             album_msgs = await message.reply_media_group(media=media_group, protect_content=protect)
                             if album_msgs:
-                                last_sent_msg = album_msgs[0]
                                 for m in album_msgs:
                                     bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
                                     asyncio.create_task(delayed_react(chat_id, m.message_id, bot_emoji))
@@ -567,18 +562,39 @@ async def queue_worker():
                         asyncio.create_task(delayed_react(chat_id, last_sent_msg.message_id, bot_emoji))
                         user_emoji = get_smart_reaction(last_user_reaction, chat_id)
                         asyncio.create_task(delayed_react(chat_id, last_sent_msg.message_id, user_emoji))
+                
+                if status_msg:
+                    face_msg = active_emoji_tasks.pop(status_msg.message_id, None)
+                    try:
+                        await status_msg.delete()
+                    except Exception:
+                        pass
+                    if face_msg:
+                        try:
+                            await face_msg.delete()
+                        except Exception:
+                            pass
             else:
-                if status_msg: await status_msg.delete()
-                err_msg = await live_typing_reply(message, "الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي", reply_markup=None, trigger_emoji_logic=True)
+                if status_msg:
+                    face_msg = active_emoji_tasks.pop(status_msg.message_id, None)
+                    try: await status_msg.delete()
+                    except Exception: pass
+                    if face_msg:
+                        try: await face_msg.delete()
+                        except Exception: pass
+                await live_typing_reply(message, "الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي", reply_markup=None, trigger_emoji_logic=True)
         except Exception:
-            if status_msg: await status_msg.delete()
-            err_msg = await live_typing_reply(message, "الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي", reply_markup=None, trigger_emoji_logic=True)
+            if status_msg:
+                face_msg = active_emoji_tasks.pop(status_msg.message_id, None)
+                try: await status_msg.delete()
+                except Exception: pass
+                if face_msg:
+                    try: await face_msg.delete()
+                    except Exception: pass
+            await live_typing_reply(message, "الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي", reply_markup=None, trigger_emoji_logic=True)
         finally:
             if file_path and os.path.exists(file_path):
                 try: os.remove(file_path)
-                except Exception: pass
-            if status_msg:
-                try: await status_msg.delete()
                 except Exception: pass
             async with counter_lock:
                 if user_id in user_task_counts:
