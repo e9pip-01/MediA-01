@@ -14,6 +14,7 @@ from aiogram.filters import ChatMemberUpdatedFilter
 import yt_dlp
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
@@ -77,6 +78,32 @@ def clean_and_format_text(text: str) -> str:
     filtered = re.sub(r'[^a-zA-Z0-9а-яА-ЯёЁ\u0600-\u06FF\s\-]', '', result_text)
     filtered = re.sub(r'\s+', ' ', filtered).strip()
     return filtered
+
+async def translate_text(text: str, target_lang: str) -> str:
+    if not GEMINI_API_KEY:
+        return ""
+    lang_name = "English" if target_lang == "en" else "Russian"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+    prompt = f"Translate the following text strictly into {lang_name}. Do not add any introduction, explanations, notes or extra formatting, just output the translation directly:\n\n{text}"
+    
+    data = {
+        "contents": [{"parts": [{"text": prompt}]}]
+    }
+    
+    try:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(data).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(None, lambda: urllib.request.urlopen(req, timeout=10).read())
+        res_json = json.loads(response.decode("utf-8"))
+        translated = res_json["candidates"][0]["content"]["parts"][0]["text"].strip()
+        return clean_and_format_text(translated)
+    except Exception:
+        return ""
 
 async def extract_target_user(message: Message) -> tuple[int, str]:
     if message.reply_to_message and message.reply_to_message.from_user:
@@ -391,7 +418,7 @@ async def live_typing_progress_reply_init(message: Message, trigger_emoji_logic:
     chat_id = message.chat.id
     user_id = message.from_user.id if message.from_user else 0
     protect = await is_content_protected(chat_id)
-    sent_msg = await message.reply("يتم البدء باستكشاف طلبك\nسيتم ارسال الميديا الان", protect_content=protect)
+    sent_msg = await message.reply("انتظر لأتمعن النظر على الرابط وتفقده\nسيتم ارسال الميديا", protect_content=protect)
     if trigger_emoji_logic:
         active_emoji_tasks[sent_msg.message_id] = None
         spawn_emoji_task(sent_msg, trigger_by_user_id=user_id)
@@ -401,7 +428,7 @@ async def live_typing_progress_reply_init(message: Message, trigger_emoji_logic:
 async def update_progress_percentage(sent_msg: Message, percentage: int):
     if not sent_msg: return
     try:
-        visible_text = f"يتم البدء باستكشاف طلبك...\nسيتم ارسال الميديا الان {percentage}%"
+        visible_text = f"انتظر لأتمعن النظر على الرابط وتفقده\nسيتم ارسال الميديا {percentage}%"
         if sent_msg.text != visible_text:
             await sent_msg.edit_text(visible_text)
     except Exception:
@@ -873,7 +900,7 @@ async def universal_handler(message: Message):
                     btn_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="تواصل مع المطور", url=DEFAULT_SUBSCRIBE_LINK, style="success")]])
                 resp = await bot.send_message(
                     chat_id=chat_id,
-                    text="اشترك بالقناة لو ماراح يشتغل\nوياك البوت ضروري عيني",
+                    text="اشترك بالقناة لو ماراح يشتغل\nوياال بوت ضروري عيني",
                     reply_markup=btn_kb,
                     reply_to_message_id=message.message_id,
                     protect_content=protect
@@ -934,7 +961,11 @@ async def universal_handler(message: Message):
             async with aiosqlite.connect("bot_data.db") as db:
                 await db.execute("INSERT OR REPLACE INTO translation_settings (user_id, lang, mode) VALUES (?, ?, (SELECT mode FROM translation_settings WHERE user_id = ?))", (user_id, target_lang, user_id))
                 await db.commit()
-            resp = await message.reply("تم تبديل لغتك مثل ماتريد بعد كسي\nشم طيزي فدوه", protect_content=protect)
+            kb_next_page = ReplyKeyboardMarkup(keyboard=[
+                [KeyboardButton(text="وضع اللغات")],
+                [KeyboardButton(text="عودة")]
+            ], resize_keyboard=True)
+            resp = await message.reply("تم تبديل لغتك مثل ماتريد بعد كسي\nشم طيزي فدوه", reply_markup=kb_next_page, protect_content=protect)
             spawn_emoji_task(resp, trigger_by_user_id=user_id)
             bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
             asyncio.create_task(delayed_react(chat_id, resp.message_id, bot_emoji))
@@ -943,7 +974,10 @@ async def universal_handler(message: Message):
     if cmd_cleaned == "وضع اللغات":
         if is_all_admins(user_id) or is_channel:
             async with aiosqlite.connect("bot_data.db") as db:
-                await db.execute("INSERT OR REPLACE INTO translation_settings (user_id, lang, mode) VALUES (?, (SELECT lang FROM translation_settings WHERE user_id = ?), 1)", (user_id, user_id))
+                async with db.execute("SELECT lang FROM translation_settings WHERE user_id = ?", (user_id,)) as cursor:
+                    row = await cursor.fetchone()
+                current_lang = row[0] if (row and row[0]) else "en"
+                await db.execute("INSERT OR REPLACE INTO translation_settings (user_id, lang, mode) VALUES (?, ?, 1)", (user_id, current_lang))
                 await db.commit()
             kb_cancel_only = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="الغاء")]], resize_keyboard=True)
             resp = await message.reply("اي شي تكتبه هسه راح اعتبره TrANSLATioN\nوادزلك الكلام بنفس شروطك الكتابيه ولغتك", reply_markup=kb_cancel_only, protect_content=protect)
@@ -1038,8 +1072,9 @@ async def universal_handler(message: Message):
             async with aiosqlite.connect("bot_data.db") as db:
                 async with db.execute("SELECT lang, mode FROM translation_settings WHERE user_id = ?", (user_id,)) as cursor:
                     t_row = await cursor.fetchone()
-            if t_row and t_row[1] == 1 and t_row[0]:
-                formatted_res = await translate_text(cmd_cleaned, t_row[0])
+            if t_row and t_row[1] == 1:
+                target_lang = t_row[0] if t_row[0] else "en"
+                formatted_res = await translate_text(cmd_cleaned, target_lang)
                 if formatted_res.strip():
                     resp = await message.reply(formatted_res, protect_content=protect)
                     spawn_emoji_task(resp, trigger_by_user_id=user_id)
