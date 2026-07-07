@@ -242,6 +242,8 @@ def spawn_emoji_task(bot_message: Message, custom_emoji: str = None, reply_marku
             if rep_msg:
                 bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
                 asyncio.create_task(delayed_react(chat_id, rep_msg.message_id, bot_emoji))
+                bot_reply_emoji = get_smart_reaction(last_user_reaction, chat_id)
+                asyncio.create_task(delayed_react(chat_id, rep_msg.message_id, bot_reply_emoji))
             if bot_message.message_id in active_emoji_tasks:
                 active_emoji_tasks[bot_message.message_id] = rep_msg
         except Exception:
@@ -318,6 +320,8 @@ async def live_typing_reply(message: Message, full_text: str, reply_markup=None,
             spawn_emoji_task(sent_msg, trigger_by_user_id=user_id)
         bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
         asyncio.create_task(delayed_react(chat_id, sent_msg.message_id, bot_emoji))
+        user_emoji = get_smart_reaction(last_user_reaction, chat_id)
+        asyncio.create_task(delayed_react(chat_id, sent_msg.message_id, user_emoji))
     return sent_msg
 
 async def live_typing_progress_reply(message: Message, reply_markup=None, trigger_emoji_logic: bool = False) -> Message:
@@ -433,6 +437,8 @@ async def queue_worker():
                     if last_sent_msg:
                         bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
                         asyncio.create_task(delayed_react(chat_id, last_sent_msg.message_id, bot_emoji))
+                        user_emoji = get_smart_reaction(last_user_reaction, chat_id)
+                        asyncio.create_task(delayed_react(chat_id, last_sent_msg.message_id, user_emoji))
             else:
                 if media_type == "album":
                     file_ids = file_id.split(",")
@@ -445,18 +451,24 @@ async def queue_worker():
                             for amsg in album_msgs:
                                 bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
                                 asyncio.create_task(delayed_react(chat_id, amsg.message_id, bot_emoji))
+                                user_emoji = get_smart_reaction(last_user_reaction, chat_id)
+                                asyncio.create_task(delayed_react(chat_id, amsg.message_id, user_emoji))
                         await asyncio.sleep(0.5)
                 elif media_type == "video":
                     last_sent_msg = await message.reply_document(document=file_id, reply_markup=None, protect_content=protect)
                     if last_sent_msg:
                         bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
                         asyncio.create_task(delayed_react(chat_id, last_sent_msg.message_id, bot_emoji))
+                        user_emoji = get_smart_reaction(last_user_reaction, chat_id)
+                        asyncio.create_task(delayed_react(chat_id, last_sent_msg.message_id, user_emoji))
             
             if last_sent_msg:
                 text_msg = await message.reply(text=success_text, reply_markup=combined_kb, protect_content=protect)
                 spawn_emoji_task(text_msg, trigger_by_user_id=user_id)
                 bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
                 asyncio.create_task(delayed_react(chat_id, text_msg.message_id, bot_emoji))
+                user_emoji = get_smart_reaction(last_user_reaction, chat_id)
+                asyncio.create_task(delayed_react(chat_id, text_msg.message_id, user_emoji))
                 download_queue.task_done()
                 continue
                 
@@ -480,6 +492,8 @@ async def queue_worker():
                                 for m in album_msgs:
                                     bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
                                     asyncio.create_task(delayed_react(chat_id, m.message_id, bot_emoji))
+                                    user_emoji = get_smart_reaction(last_user_reaction, chat_id)
+                                    asyncio.create_task(delayed_react(chat_id, m.message_id, user_emoji))
                                     if m.document:
                                         all_collected_ids.append(m.document.file_id)
                             await asyncio.sleep(0.5)
@@ -519,11 +533,15 @@ async def queue_worker():
                     if last_sent_msg:
                         bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
                         asyncio.create_task(delayed_react(chat_id, last_sent_msg.message_id, bot_emoji))
+                        user_emoji = get_smart_reaction(last_user_reaction, chat_id)
+                        asyncio.create_task(delayed_react(chat_id, last_sent_msg.message_id, user_emoji))
                 if last_sent_msg:
                     text_msg = await message.reply(text=success_text, reply_markup=combined_kb, protect_content=protect)
                     spawn_emoji_task(text_msg, trigger_by_user_id=user_id)
                     bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
                     asyncio.create_task(delayed_react(chat_id, text_msg.message_id, bot_emoji))
+                    user_emoji = get_smart_reaction(last_user_reaction, chat_id)
+                    asyncio.create_task(delayed_react(chat_id, text_msg.message_id, user_emoji))
             else:
                 if status_msg: await status_msg.delete()
                 err_msg = await live_typing_reply(message, "الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي", reply_markup=None, trigger_emoji_logic=True)
@@ -590,9 +608,8 @@ async def admin_cmd(message: Message):
     is_group = message.chat.type in ["group", "supergroup"]
     is_channel = message.chat.type == "channel"
     
-    if is_channel or (not is_group or await is_user_admin_or_owner(chat_id, user_id)):
-        user_emoji = get_smart_reaction(last_user_reaction, chat_id)
-        asyncio.create_task(delayed_react(chat_id, message.message_id, user_emoji))
+    user_emoji = get_smart_reaction(last_user_reaction, chat_id)
+    asyncio.create_task(delayed_react(chat_id, message.message_id, user_emoji))
         
     if is_all_admins(user_id):
         kb = ReplyKeyboardMarkup(keyboard=[
@@ -660,18 +677,8 @@ async def universal_handler(message: Message):
                 await db.execute("INSERT OR IGNORE INTO users_log (user_id) VALUES (?)", (user_id,))
                 await db.commit()
                 
-    can_react_global = False
-    if not is_group and not is_channel:
-        can_react_global = True
-    elif is_group:
-        if await is_user_admin_or_owner(chat_id, user_id) or user_id == bot.id:
-            can_react_global = True
-    elif is_channel:
-        can_react_global = True
-            
-    if can_react_global:
-        user_emoji = get_smart_reaction(last_user_reaction, chat_id)
-        asyncio.create_task(delayed_react(chat_id, message.message_id, user_emoji))
+    user_emoji = get_smart_reaction(last_user_reaction, chat_id)
+    asyncio.create_task(delayed_react(chat_id, message.message_id, user_emoji))
         
     cmd_cleaned = message.text.strip() if message.text else ""
 
