@@ -402,33 +402,36 @@ async def update_progress_percentage(sent_msg: Message, percentage: int):
     if not sent_msg: return
     try:
         visible_text = f"يتم البدء باستكشاف طلبك...\nسيتم ارسال الميديا الان {percentage}%"
-        await sent_msg.edit_text(visible_text)
+        if sent_msg.text != visible_text:
+            await sent_msg.edit_text(visible_text)
     except Exception:
         pass
 
-async def extract_and_download(target: str, mute_audio: bool = False):
+async def extract_and_download(target: str, status_msg: Message = None, mute_audio: bool = False):
     loop = asyncio.get_event_loop()
     fmt = 'bestvideo+bestaudio/best'
+    
+    last_percent = -1
+    def progress_hook(d):
+        nonlocal last_percent
+        if d['status'] == 'downloading':
+            total = d.get('total_bytes') or d.get('total_bytes_estimate')
+            downloaded = d.get('downloaded_bytes', 0)
+            if total:
+                percent = int((downloaded / total) * 100)
+                if percent != last_percent and status_msg:
+                    last_percent = percent
+                    asyncio.run_coroutine_threadsafe(
+                        update_progress_percentage(status_msg, percent), 
+                        loop
+                    )
+
     ydl_opts = {
         'format': fmt, 
         'outtmpl': '%(uploader)s_tmp.%(ext)s', 
         'noplaylist': True, 
         'quiet': True,
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-            'Accept-Language': 'en-US,en;q=0.9,ar;q=0.8',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Sec-Ch-Ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-            'Sec-Ch-Ua-Mobile': '?0',
-            'Sec-Ch-Ua-Platform': '"Windows"',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none',
-            'Sec-Fetch-User': '?1',
-            'Upgrade-Insecure-Requests': '1',
-            'Connection': 'keep-alive'
-        }
+        'progress_hooks': [progress_hook]
     }
     search_target = target
     def sync_download():
@@ -510,13 +513,11 @@ async def queue_worker():
             continue
                 
         status_msg = await live_typing_progress_reply_init(message, trigger_emoji_logic=True)
-        await update_progress_percentage(status_msg, 25)
         
         file_path = None
         is_img_type = False
         try:
-            res = await extract_and_download(target, mute_audio=False)
-            await update_progress_percentage(status_msg, 65)
+            res = await extract_and_download(target, status_msg=status_msg, mute_audio=False)
             
             if res and res[0]:
                 file_path, orig_title, uploader, media_id, is_img_type, actual_ext = res
@@ -707,7 +708,7 @@ async def universal_handler(message: Message):
         if cmd_cleaned in ["مسح امر", "ح امر"]:
             target_cmd = message.reply_to_message.text.strip() if message.reply_to_message.text else ""
             if target_cmd in ["طرد", "نبذ", "مسح المنبوذين", "عرض المنبوذين", "رف", "الاوامر", "ادت", "تعيين الرابط", "عرض الزر", "تبديل اللغه", "وضع اللغات", "الغاء", "عودة"]:
-                reply_txt = f"¹# - امر {target_cmd} غير مضاف\nالمهم شم طيزي"
+                reply_txt = f"¹ - امر {target_cmd} غير مضاف\nالمهم شم طيزي"
                 await message.reply(reply_txt, protect_content=protect)
                 return
             async with aiosqlite.connect("bot_data.db") as db:
@@ -716,9 +717,9 @@ async def universal_handler(message: Message):
                 if exists:
                     await db.execute("DELETE FROM custom_commands WHERE command_name = ?", (target_cmd,))
                     await db.commit()
-                    reply_txt = f"¹# - تم مسح امر {target_cmd} بعد كسي\nيدلل نياشي"
+                    reply_txt = f"¹ - تم مسح امر {target_cmd} بعد كسي\nيدلل نياشي"
                 else:
-                    reply_txt = f"¹# - امر {target_cmd} غير مضاف\nالمهم شم طيزي"
+                    reply_txt = f"¹ - امر {target_cmd} غير مضاف\nالمهم شم طيزي"
             await message.reply(reply_txt, protect_content=protect)
             return
 
@@ -729,7 +730,7 @@ async def universal_handler(message: Message):
                     async with aiosqlite.connect("bot_data.db") as db:
                         await db.execute("INSERT OR REPLACE INTO custom_commands (command_name, base_action) VALUES (?, ?)", (new_cmd, cmd_cleaned))
                         await db.commit()
-                    reply_txt = f"¹# - امر {new_cmd} اصبح يعمل بنفس الفكرة\nيدلل نياشي"
+                    reply_txt = f"¹ - امر {new_cmd} اصبح يعمل بنفس الفكرة\nيدلل نياشي"
                     await message.reply(reply_txt, protect_content=protect)
                     return
 
@@ -758,7 +759,7 @@ async def universal_handler(message: Message):
                     
                     if current_act == "طرد":
                         if member_status in ["left", "kicked"]:
-                            rep_text = f"¹# - مولاي هذا {user_markdown} ماله اثر\nلو مغادر لو مطرود"
+                            rep_text = f"¹ - مولاي هذا {user_markdown} ماله اثر\nلو مغادر لو مطرود"
                             resp = await message.reply(rep_text, parse_mode="Markdown", protect_content=protect)
                             spawn_emoji_task(resp, trigger_by_user_id=user_id)
                             return
@@ -767,14 +768,14 @@ async def universal_handler(message: Message):
                         act = "طرد"
                     else:
                         if member_status == "kicked":
-                            rep_text = f"¹# - مولاي هذا {user_markdown} منبوذ مسبقا\nشلون اسوي وياه"
+                            rep_text = f"¹ - مولاي هذا {user_markdown} منبوذ مسبقا\nشلون اسوي وياه"
                             resp = await message.reply(rep_text, parse_mode="Markdown", protect_content=protect)
                             spawn_emoji_task(resp, trigger_by_user_id=user_id)
                             return
                         await bot.ban_chat_member(chat_id=chat_id, user_id=target_id)
                         act = "نبذ"
                     
-                    rep_text = f"¹# - تم {act} هذا {user_markdown} after kalbi\nyedlal nyaj ksei"
+                    rep_text = f"¹ - تم {act} هذا {user_markdown} after kalbi\nyedlal nyaj ksei"
                     resp = await message.reply(rep_text, parse_mode="Markdown", protect_content=protect)
                     spawn_emoji_task(resp, trigger_by_user_id=user_id)
                 except Exception:
@@ -792,7 +793,7 @@ async def universal_handler(message: Message):
                         [InlineKeyboardButton(text=chat_title, url="tg://user?id=8597653867", style="danger")]
                     ])
                     
-                    rep_text = "¹# - تم مسح كل المنبوذين after kalbi\nyedlal nyaj tizi"
+                    rep_text = "¹ - تم مسح كل المنبوذين after kalbi\nyedlal nyaj tizi"
                     resp = await message.reply(rep_text, reply_markup=inline_kb, protect_content=protect)
                     spawn_emoji_task(resp, trigger_by_user_id=user_id)
                 except Exception:
@@ -817,7 +818,7 @@ async def universal_handler(message: Message):
                 for num, uname in lines:
                     p_num = to_persian_num(num)
                     obf_name = obfuscate_and_format_username(uname)
-                    chunk.append(f"{p_num}# @||{obf_name.lstrip('@')}||")
+                    chunk.append(f"{p_num} @||{obf_name.lstrip('@')}||")
                     
                     if len(chunk) == 42:
                         await bot.send_message(chat_id=chat_id, text="\n".join(chunk), parse_mode="MarkdownV2", reply_to_message_id=message.message_id, protect_content=protect)
@@ -837,7 +838,7 @@ async def universal_handler(message: Message):
                 await db.execute("INSERT OR REPLACE INTO chat_notifications (chat_id, status) VALUES (?, ?)", (chat_id, status_to_set))
                 await db.commit()
             action_word = "قفل" if status_to_set == "locked" else "فتح"
-            reply_txt = f"¹# - تم {action_word} الاشعارات مولاي\nيدلل تاج راسي"
+            reply_txt = f"¹ - تم {action_word} الاشعارات مولاي\nيدلل تاج راسي"
             resp = await message.reply(reply_txt, protect_content=protect)
             spawn_emoji_task(resp, trigger_by_user_id=user_id)
         return
@@ -849,7 +850,7 @@ async def universal_handler(message: Message):
                 await db.execute("INSERT OR REPLACE INTO chat_protection (chat_id, status) VALUES (?, ?)", (chat_id, status_to_set))
                 await db.commit()
             action_word = "قفل" if status_to_set == "locked" else "فتح"
-            reply_txt = f"¹# - تم {action_word} النقل مولاي\nيدلل تاج راسي"
+            reply_txt = f"¹ - تم {action_word} النقل مولاي\nيدلل تاج راسي"
             new_protect = (status_to_set == "locked")
             resp = await message.reply(reply_txt, protect_content=new_protect)
             spawn_emoji_task(resp, trigger_by_user_id=user_id)
