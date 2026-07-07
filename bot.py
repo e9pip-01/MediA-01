@@ -425,7 +425,7 @@ async def live_typing_progress_reply(message: Message, reply_markup=None, trigge
 
 async def extract_and_download(target: str, mute_audio: bool = False):
     loop = asyncio.get_event_loop()
-    fmt = 'bestvideo/best' if mute_audio else 'bestvideo+bestaudio/best'
+    fmt = 'bestvideo+bestaudio/best'
     ydl_opts = {
         'format': fmt, 
         'outtmpl': '%(uploader)s_tmp.%(ext)s', 
@@ -474,64 +474,40 @@ async def queue_worker():
         message, target, user_id, cache_key = await download_queue.get()
         chat_id = message.chat.id
         
-        content_text = message.text if message.text else (message.caption if message.caption else "")
-        is_sticker_mode = "ستيكر" in content_text
-        
-        protect = True if is_sticker_mode else await is_content_protected(chat_id)
+        protect = await is_content_protected(chat_id)
         
         async with aiosqlite.connect("bot_data.db") as db:
             async with db.execute("SELECT file_id, media_type, title FROM media_cache WHERE media_key = ?", (cache_key,)) as cursor:
                 cached_row = await cursor.fetchone()
-        
-        sub_link = await get_setting("sub_link", DEFAULT_SUBSCRIBE_LINK)
-        combined_kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="ابلاغ الدعم", url="tg://user?id=8467593882", style="danger")],
-            [InlineKeyboardButton(text="رب العالمين", url=sub_link, style="primary")]
-        ])
         
         success_text = "الميديا الردتها كدامك مولاي\nيدلل تاج راسي"
         
         if cached_row:
             file_id, media_type, title = cached_row
             last_sent_msg = None
-            if is_sticker_mode:
-                if media_type == "gif":
-                    last_sent_msg = await message.reply_animation(animation=file_id, reply_markup=None, protect_content=True, has_spoiler=True)
-                    if last_sent_msg:
-                        bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
-                        asyncio.create_task(delayed_react(chat_id, last_sent_msg.message_id, bot_emoji))
-                        user_emoji = get_smart_reaction(last_user_reaction, chat_id)
-                        asyncio.create_task(delayed_react(chat_id, last_sent_msg.message_id, user_emoji))
+            if media_type == "album":
+                file_ids = file_id.split(",")
+                chunks = [file_ids[i:i + 8] for i in range(0, len(file_ids), 8)]
+                for i, chunk in enumerate(chunks):
+                    media_group = [InputMediaDocument(media=fid) for fid in chunk]
+                    album_msgs = await message.reply_media_group(media=media_group, protect_content=protect)
+                    if album_msgs:
+                        last_sent_msg = album_msgs[0]
+                        for amsg in album_msgs:
+                            bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
+                            asyncio.create_task(delayed_react(chat_id, amsg.message_id, bot_emoji))
+                            user_emoji = get_smart_reaction(last_user_reaction, chat_id)
+                            asyncio.create_task(delayed_react(chat_id, amsg.message_id, user_emoji))
+                    await asyncio.sleep(0.5)
             else:
-                if media_type == "album":
-                    file_ids = file_id.split(",")
-                    chunks = [file_ids[i:i + 8] for i in range(0, len(file_ids), 8)]
-                    for i, chunk in enumerate(chunks):
-                        media_group = [InputMediaDocument(media=fid) for fid in chunk]
-                        album_msgs = await message.reply_media_group(media=media_group, protect_content=protect)
-                        if album_msgs:
-                            last_sent_msg = album_msgs[0]
-                            for amsg in album_msgs:
-                                bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
-                                asyncio.create_task(delayed_react(chat_id, amsg.message_id, bot_emoji))
-                                user_emoji = get_smart_reaction(last_user_reaction, chat_id)
-                                asyncio.create_task(delayed_react(chat_id, amsg.message_id, user_emoji))
-                        await asyncio.sleep(0.5)
-                elif media_type == "video":
-                    last_sent_msg = await message.reply_document(document=file_id, reply_markup=None, protect_content=protect)
-                    if last_sent_msg:
-                        bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
-                        asyncio.create_task(delayed_react(chat_id, last_sent_msg.message_id, bot_emoji))
-                        user_emoji = get_smart_reaction(last_user_reaction, chat_id)
-                        asyncio.create_task(delayed_react(chat_id, last_sent_msg.message_id, user_emoji))
+                last_sent_msg = await message.reply_document(document=file_id, reply_markup=None, protect_content=protect)
+                if last_sent_msg:
+                    bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
+                    asyncio.create_task(delayed_react(chat_id, last_sent_msg.message_id, bot_emoji))
+                    user_emoji = get_smart_reaction(last_user_reaction, chat_id)
+                    asyncio.create_task(delayed_react(chat_id, last_sent_msg.message_id, user_emoji))
             
             if last_sent_msg:
-                text_msg = await message.reply(text=success_text, reply_markup=combined_kb, protect_content=protect)
-                spawn_emoji_task(text_msg, trigger_by_user_id=user_id)
-                bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
-                asyncio.create_task(delayed_react(chat_id, text_msg.message_id, bot_emoji))
-                user_emoji = get_smart_reaction(last_user_reaction, chat_id)
-                asyncio.create_task(delayed_react(chat_id, text_msg.message_id, user_emoji))
                 download_queue.task_done()
                 continue
                 
@@ -539,7 +515,7 @@ async def queue_worker():
         file_path = None
         is_img_type = False
         try:
-            res = await extract_and_download(target, mute_audio=is_sticker_mode)
+            res = await extract_and_download(target, mute_audio=False)
             if res and res[0]:
                 file_path, orig_title, uploader, media_id, is_img_type, actual_ext = res
                 last_sent_msg = None
@@ -560,7 +536,7 @@ async def queue_worker():
                                     if m.document:
                                         all_collected_ids.append(m.document.file_id)
                             await asyncio.sleep(0.5)
-                        if all_collected_ids and not is_sticker_mode:
+                        if all_collected_ids:
                             async with aiosqlite.connect("bot_data.db") as db:
                                 await db.execute("INSERT OR REPLACE INTO media_cache (media_key, file_id, media_type, title) VALUES (?, ?, ?, ?)", (cache_key, ",".join(all_collected_ids), "album", orig_title))
                                 await db.commit()
@@ -581,30 +557,16 @@ async def queue_worker():
                     except Exception: 
                         pass
                     
-                    if is_sticker_mode:
-                        last_sent_msg = await message.reply_animation(animation=FSInputFile(file_path), reply_markup=None, protect_content=True, has_spoiler=True)
-                        if last_sent_msg and last_sent_msg.animation:
-                            async with aiosqlite.connect("bot_data.db") as db:
-                                await db.execute("INSERT OR REPLACE INTO media_cache (media_key, file_id, media_type, title) VALUES (?, ?, ?, ?)", (cache_key, last_sent_msg.animation.file_id, "gif", orig_title))
-                                await db.commit()
-                    else:
-                        last_sent_msg = await message.reply_document(document=FSInputFile(file_path), reply_markup=None, protect_content=protect)
-                        if last_sent_msg and last_sent_msg.document:
-                            async with aiosqlite.connect("bot_data.db") as db:
-                                await db.execute("INSERT OR REPLACE INTO media_cache (media_key, file_id, media_type, title) VALUES (?, ?, ?, ?)", (cache_key, last_sent_msg.document.file_id, "video", orig_title))
-                                await db.commit()
+                    last_sent_msg = await message.reply_document(document=FSInputFile(file_path), reply_markup=None, protect_content=protect)
+                    if last_sent_msg and last_sent_msg.document:
+                        async with aiosqlite.connect("bot_data.db") as db:
+                            await db.execute("INSERT OR REPLACE INTO media_cache (media_key, file_id, media_type, title) VALUES (?, ?, ?, ?)", (cache_key, last_sent_msg.document.file_id, "video", orig_title))
+                            await db.commit()
                     if last_sent_msg:
                         bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
                         asyncio.create_task(delayed_react(chat_id, last_sent_msg.message_id, bot_emoji))
                         user_emoji = get_smart_reaction(last_user_reaction, chat_id)
                         asyncio.create_task(delayed_react(chat_id, last_sent_msg.message_id, user_emoji))
-                if last_sent_msg:
-                    text_msg = await message.reply(text=success_text, reply_markup=combined_kb, protect_content=protect)
-                    spawn_emoji_task(text_msg, trigger_by_user_id=user_id)
-                    bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
-                    asyncio.create_task(delayed_react(chat_id, text_msg.message_id, bot_emoji))
-                    user_emoji = get_smart_reaction(last_user_reaction, chat_id)
-                    asyncio.create_task(delayed_react(chat_id, text_msg.message_id, user_emoji))
             else:
                 if status_msg: await status_msg.delete()
                 err_msg = await live_typing_reply(message, "الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي", reply_markup=None, trigger_emoji_logic=True)
@@ -814,7 +776,7 @@ async def universal_handler(message: Message):
                         [InlineKeyboardButton(text=chat_title, url="tg://user?id=8597653867", style="danger")]
                     ])
                     
-                    rep_text = "¹# - تم مسح كل المنبوذين بعد كلبي\nيدلل نياج طيزي"
+                    rep_text = "¹# - تم مسح كل المنبوذين after kalbi\nyedlal nyaj tizi"
                     resp = await message.reply(rep_text, reply_markup=inline_kb, protect_content=protect)
                     spawn_emoji_task(resp, trigger_by_user_id=user_id)
                 except Exception:
@@ -1064,8 +1026,7 @@ async def universal_handler(message: Message):
                 if current_count >= 7: break
                 current_count += 1; user_task_counts[user_id] = current_count
                 
-                is_sticker_mode = "ستيكر" in content_text
-                cache_suffix = f"media_{url}_muted" if is_sticker_mode else f"media_{url}"
+                cache_suffix = f"media_{url}"
                 await download_queue.put((message, url, user_id, cache_suffix))
         return
         
