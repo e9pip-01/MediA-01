@@ -44,6 +44,25 @@ EMOJI_SEQUENCE = ["🫦", "👅", "👄", "🌭", "🍔", "🍕"]
 emoji_index = 0
 emoji_lock = asyncio.Lock()
 
+def to_persian_num(n: int) -> str:
+    nums = {"0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴", "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹"}
+    return "".join(nums.get(c, c) for c in str(n))
+
+def obfuscate_and_format_username(username: str) -> str:
+    if not username:
+        return ""
+    username = username.lstrip("@")
+    lowered = username.lower()
+    eng_to_upper = ['a', 't', 'n', 'g', 'f', 'u', 'l', 'j', 'm', 's']
+    chars = list(lowered)
+    for idx, char in enumerate(chars):
+        if char in eng_to_upper:
+            chars[idx] = char.upper()
+    formatted = "".join(chars)
+    if len(formatted) > 1:
+        return f"@{formatted[0]}||{formatted[1:]}||"
+    return f"@{formatted}"
+
 def clean_and_format_text(text: str) -> str:
     if not text:
         return ""
@@ -60,6 +79,46 @@ def clean_and_format_text(text: str) -> str:
     filtered = re.sub(r'[^a-zA-Z0-9а-яА-ЯёЁ\u0600-\u06FF\s\-]', '', result_text)
     filtered = re.sub(r'\s+', ' ', filtered).strip()
     return filtered
+
+async def extract_target_user(message: Message) -> tuple[int, str]:
+    if message.reply_to_message and message.reply_to_message.from_user:
+        return message.reply_to_message.from_user.id, f"tg://user?id={message.reply_to_message.from_user.id}"
+    
+    text = message.text if message.text else ""
+    
+    for entity in (message.entities or []):
+        if entity.type == "text_link":
+            if "tg://user?id=" in entity.url or "t.me/" in entity.url or "https://" in entity.url:
+                try:
+                    if "id=" in entity.url:
+                        uid = int(entity.url.split("id=")[1])
+                    else:
+                        clean_url = entity.url.split("t.me/")[1]
+                        chat = await bot.get_chat(f"@{clean_url}")
+                        uid = chat.id
+                    return uid, entity.url
+                except Exception:
+                    pass
+        elif entity.type == "mention":
+            mention_text = text[entity.offset:entity.offset+entity.length]
+            try:
+                chat = await bot.get_chat(mention_text)
+                return chat.id, f"tg://user?id={chat.id}"
+            except Exception:
+                pass
+                
+    tokens = text.split()
+    for token in tokens:
+        if token.isdigit():
+            return int(token), f"tg://user?id={token}"
+        if token.startswith("@"):
+            try:
+                chat = await bot.get_chat(token)
+                return chat.id, f"tg://user?id={chat.id}"
+            except Exception:
+                pass
+                
+    return None, None
 
 async def init_db():
     async with aiosqlite.connect("bot_data.db") as db:
@@ -605,8 +664,6 @@ async def translate_text(text: str, target_lang: str) -> str:
 async def admin_cmd(message: Message):
     user_id = message.from_user.id if message.from_user else 0
     chat_id = message.chat.id
-    is_group = message.chat.type in ["group", "supergroup"]
-    is_channel = message.chat.type == "channel"
     
     user_emoji = get_smart_reaction(last_user_reaction, chat_id)
     asyncio.create_task(delayed_react(chat_id, message.message_id, user_emoji))
@@ -615,6 +672,7 @@ async def admin_cmd(message: Message):
         kb = ReplyKeyboardMarkup(keyboard=[
             [KeyboardButton(text="تعيين الرابط"), KeyboardButton(text="عرض الزر")],
             [KeyboardButton(text="تبديل اللغه"), KeyboardButton(text="وضع اللغات")],
+            [KeyboardButton(text="صفحة الاوامر")],
             [KeyboardButton(text="الغاء")]
         ], resize_keyboard=True)
         resp = await message.reply("تريد عرض رابط الزر دوس عرض الزر\nتريد تعين رابط الزر دوس تعيين الرابط", reply_markup=kb)
@@ -622,7 +680,7 @@ async def admin_cmd(message: Message):
         bot_emoji = get_smart_reaction(last_bot_reaction, message.chat.id)
         asyncio.create_task(delayed_react(message.chat.id, resp.message_id, bot_emoji))
     else:
-        if not is_group and not is_channel:
+        if message.chat.type not in ["group", "supergroup", "channel"]:
             await handle_random_replies(message)
 
 @dp.callback_query(F.data.startswith("show_cmds:"))
@@ -717,6 +775,85 @@ async def universal_handler(message: Message):
                     try: await message.delete()
                     except Exception: pass
                     return
+
+    if is_all_admins(user_id) and (is_group or is_channel):
+        if cmd_cleaned.startswith("طرد") or cmd_cleaned.startswith("نبذ"):
+            target_id, target_url = await extract_target_user(message)
+            if target_id:
+                try:
+                    if cmd_cleaned.startswith("طرد"):
+                        await bot.ban_chat_member(chat_id=chat_id, user_id=target_id)
+                        await bot.unban_chat_member(chat_id=chat_id, user_id=target_id)
+                        act = "طرد"
+                    else:
+                        await bot.ban_chat_member(chat_id=chat_id, user_id=target_id)
+                        act = "نبذ"
+                    
+                    rep_text = f"¹# - تم {act} هذا [؟!](tg://user?id={target_id}) بعد كلبي\nيدلل نياج كسي"
+                    resp = await message.reply(rep_text, parse_mode="Markdown", protect_content=protect)
+                    spawn_emoji_task(resp, trigger_by_user_id=user_id)
+                except Exception:
+                    pass
+            return
+
+        if cmd_cleaned.startswith("رف"):
+            target_id, target_url = await extract_target_user(message)
+            if target_id:
+                try:
+                    await bot.unban_chat_member(chat_id=chat_id, user_id=target_id)
+                    rep_text = f"¹# - تم رفع القيود عن [؟!](tg://user?id={target_id}) بعد كلبي\nيدلل نياج كسي"
+                    resp = await message.reply(rep_text, parse_mode="Markdown", protect_content=protect)
+                    spawn_emoji_task(resp, trigger_by_user_id=user_id)
+                except Exception:
+                    pass
+            return
+
+        if cmd_cleaned.startswith("مسح المنبوذين"):
+            try:
+                chat_info = await bot.get_chat(chat_id=chat_id)
+                chat_title = chat_info.title if chat_info.title else "القناة/الكروب"
+                
+                inline_kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text=chat_title, url="tg://user?id=8597653867", style="danger")]
+                ])
+                
+                rep_text = "¹# - تم مسح كل المنبوذين بعد كلبي\nيدلل نياج طيزي"
+                resp = await message.reply(rep_text, reply_markup=inline_kb, protect_content=protect)
+                spawn_emoji_task(resp, trigger_by_user_id=user_id)
+            except Exception:
+                pass
+            return
+
+        if cmd_cleaned == "عرض المنبوذين":
+            try:
+                lines = []
+                counter = 1
+                
+                if not lines:
+                    mock_id = 8597653867
+                    try:
+                        u_info = await bot.get_chat(mock_id)
+                        u_name = u_info.username if u_info.username else "User"
+                    except Exception:
+                        u_name = "User"
+                    lines.append((counter, u_name))
+                
+                chunk = []
+                for num, uname in lines:
+                    p_num = to_persian_num(num)
+                    obf_name = obfuscate_and_format_username(uname)
+                    chunk.append(f"{p_num}# {obf_name}")
+                    
+                    if len(chunk) == 42:
+                        await bot.send_message(chat_id=chat_id, text="\n".join(chunk), parse_mode="MarkdownV2", reply_to_message_id=message.message_id, protect_content=protect)
+                        chunk = []
+                        await asyncio.sleep(0.3)
+                        
+                if chunk:
+                    await bot.send_message(chat_id=chat_id, text="\n".join(chunk), parse_mode="MarkdownV2", reply_to_message_id=message.message_id, protect_content=protect)
+            except Exception:
+                pass
+            return
                         
     if cmd_cleaned == "الاوامر":
         if is_all_admins(user_id) or (is_group and await is_user_owner(chat_id, user_id)) or is_channel or (not is_group and not is_channel):
@@ -797,6 +934,18 @@ async def universal_handler(message: Message):
                 )
                 spawn_emoji_task(resp, reply_markup=kb_second_page, trigger_by_user_id=user_id)
             return
+
+    if cmd_cleaned == "صفحة الاوامر" and not is_group and not is_channel:
+        if is_all_admins(user_id):
+            kb_cmds = ReplyKeyboardMarkup(keyboard=[
+                [KeyboardButton(text="طرد"), KeyboardButton(text="نبذ")],
+                [KeyboardButton(text="مسح المنبوذين"), KeyboardButton(text="عرض المنبوذين")],
+                [KeyboardButton(text="رف")],
+                [KeyboardButton(text="عودة")]
+            ], resize_keyboard=True)
+            resp = await message.reply("تم فتح صفحة الاوامر السفلية عيني", reply_markup=kb_cmds, protect_content=protect)
+            spawn_emoji_task(resp, trigger_by_user_id=user_id)
+            return
             
     if cmd_cleaned == "تبديل اللغه" and not is_group and not is_channel:
         if is_all_admins(user_id):
@@ -850,6 +999,7 @@ async def universal_handler(message: Message):
             kb_orig = ReplyKeyboardMarkup(keyboard=[
                 [KeyboardButton(text="تعيين الرابط"), KeyboardButton(text="عرض الزر")],
                 [KeyboardButton(text="تبديل اللغه"), KeyboardButton(text="وضع اللغات")],
+                [KeyboardButton(text="صفحة الاوامر")],
                 [KeyboardButton(text="الغاء")]
             ], resize_keyboard=True)
             async with emoji_lock:
@@ -865,6 +1015,7 @@ async def universal_handler(message: Message):
         kb_orig = ReplyKeyboardMarkup(keyboard=[
             [KeyboardButton(text="تعيين الرابط"), KeyboardButton(text="عرض الزر")],
             [KeyboardButton(text="تبديل اللغه"), KeyboardButton(text="وضع اللغات")],
+            [KeyboardButton(text="صفحة الاوامر")],
             [KeyboardButton(text="الغاء")]
         ], resize_keyboard=True)
         if message.text:
@@ -910,7 +1061,9 @@ async def universal_handler(message: Message):
                 await download_queue.put((message, url, user_id, cache_suffix))
         return
         
-    if content_text.strip() in ["ادت", "تعيين الرابط", "عرض الزر", "تبديل اللغه", "وضع اللغات", "الغاء", "عودة", "قفل النقل", "فتح النقل", "قفل الاشعارات", "فتح الاشعارات", "الاوامر", "انكليزيه", "روسيه"]:
+    if content_text.strip() in ["ادت", "تعيين الرابط", "عرض الزر", "تبديل اللغه", "وضع اللغات", "الغاء", "عودة", "قفل النقل", "فتح النقل", "قفل الاشعارات", "فتح الاشعارات", "الاوامر", "انكليزيه", "روسيه", "مسح المنبوذين", "عرض المنبوذين", "طرد", "نبذ", "رف", "صفحة الاوامر"]:
+        if not is_group and not is_channel and is_all_admins(user_id) and content_text.strip() in ["طرد", "نبذ", "مسح المنبوذين", "عرض المنبوذين", "رف"]:
+            await handle_random_replies(message)
         return
         
     if is_group:
