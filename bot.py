@@ -945,7 +945,6 @@ async def universal_handler(message: Message):
                 formatted_res = await translate_text(cmd_cleaned, t_row[0])
                 if formatted_res.strip():
                     resp = await message.reply(formatted_res, protect_content=protect)
-                    # هنا جعلنا رسالة الإيموجي المتناوبة الكبيرة (البرجر والشفايف إلخ) هي الوحيدة التي يتم إرسالها ولا ينزل للأسفل
                     spawn_emoji_task(resp, trigger_by_user_id=user_id)
                     return
             else:
