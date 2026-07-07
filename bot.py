@@ -12,9 +12,9 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, ChatMemberUpdated, CallbackQuery, InputMediaDocument
 from aiogram.filters import ChatMemberUpdatedFilter
 import yt_dlp
+from deep_translator import GoogleTranslator
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
@@ -68,39 +68,24 @@ def clean_and_format_text(text: str) -> str:
     if text.strip().startswith("/"):
         return text
     lowered = text.lower()
-    eng_to_upper = ['a', 't', 'n', 'g', 'f', 'u', 'l', 'j', 'm', 's']
-    rus_to_upper = ['а', 'и', 'б', 'у']
+    eng_to_upper = ['a', 't', 'n', 'g', 'f', 'u', 'j', 'm']
+    rus_to_upper = ['а', 'и', 'б']
     chars = list(lowered)
     for idx, char in enumerate(chars):
         if char in eng_to_upper or char in rus_to_upper:
             chars[idx] = char.upper()
     result_text = "".join(chars)
-    filtered = re.sub(r'[^a-zA-Z0-9а-яА-ЯёЁ\u0600-\u06FF\s\-]', '', result_text)
+    filtered = re.sub(r'[^a-zA-Z0-9а-яА-ЯёЁ\u0600-\u06FF\s\-\&\:\@\/]', '', result_text)
     filtered = re.sub(r'\s+', ' ', filtered).strip()
     return filtered
 
 async def translate_text(text: str, target_lang: str) -> str:
-    if not GEMINI_API_KEY:
-        return ""
-    lang_name = "English" if target_lang == "en" else "Russian"
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
-    prompt = f"Translate the following text strictly into {lang_name}. Do not add any introduction, explanations, notes or extra formatting, just output the translation directly:\n\n{text}"
-    
-    data = {
-        "contents": [{"parts": [{"text": prompt}]}]
-    }
-    
     try:
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(data).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST"
-        )
         loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(None, lambda: urllib.request.urlopen(req, timeout=10).read())
-        res_json = json.loads(response.decode("utf-8"))
-        translated = res_json["candidates"][0]["content"]["parts"][0]["text"].strip()
+        translated = await loop.run_in_executor(
+            None, 
+            lambda: GoogleTranslator(source='auto', target=target_lang).translate(text)
+        )
         return clean_and_format_text(translated)
     except Exception:
         return ""
@@ -944,7 +929,7 @@ async def universal_handler(message: Message):
     if cmd_cleaned == "تبديل اللغه":
         if is_all_admins(user_id) or is_channel:
             kb_langs_page = ReplyKeyboardMarkup(keyboard=[
-                [KeyboardButton(text="انكليزيه"), KeyboardButton(text="روسيه")],
+                [KeyboardButton(text="انكليزيه"), KeyboardButton(text="روسيه"), KeyboardButton(text="يابانيه")],
                 [KeyboardButton(text="عودة")]
             ], resize_keyboard=True)
             async with emoji_lock:
@@ -955,9 +940,15 @@ async def universal_handler(message: Message):
             asyncio.create_task(delayed_react(chat_id, resp.message_id, bot_emoji))
             return
             
-    if cmd_cleaned in ["انكليزيه", "روسيه"]:
+    if cmd_cleaned in ["انكليزيه", "روسيه", "يابانيه"]:
         if is_all_admins(user_id) or is_channel:
-            target_lang = "en" if cmd_cleaned == "انكليزيه" else "ru"
+            if cmd_cleaned == "انكليزيه":
+                target_lang = "en"
+            elif cmd_cleaned == "روسيه":
+                target_lang = "ru"
+            else:
+                target_lang = "ja"
+                
             async with aiosqlite.connect("bot_data.db") as db:
                 await db.execute("INSERT OR REPLACE INTO translation_settings (user_id, lang, mode) VALUES (?, ?, (SELECT mode FROM translation_settings WHERE user_id = ?))", (user_id, target_lang, user_id))
                 await db.commit()
@@ -1061,7 +1052,7 @@ async def universal_handler(message: Message):
                 await download_queue.put((message, url, user_id, cache_suffix))
         return
         
-    if content_text.strip() in ["ادت", "تعيين الرابط", "عرض الزر", "تبديل اللغه", "وضع اللغات", "الغاء", "عودة", "قفل النقل", "فتح النقل", "قفل الاشعارات", "فتح الاشعارات", "الاوامر", "انكليزيه", "روسيه", "مسح المنبوذين", "عرض المنبوذين", "طرد", "نبذ", "رف"]:
+    if content_text.strip() in ["ادت", "تعيين الرابط", "عرض الزر", "تبديل اللغه", "وضع اللغات", "الغاء", "عودة", "قفل النقل", "فتح النقل", "قفل الاشعارات", "فتح الاشعارات", "الاوامر", "انكليزيه", "روسيه", "يابانيه", "مسح المنبوذين", "عرض المنبوذين", "طرد", "نبذ", "رف"]:
         return
         
     if is_group or is_channel:
