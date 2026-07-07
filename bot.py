@@ -59,8 +59,6 @@ def obfuscate_and_format_username(username: str) -> str:
         if char in eng_to_upper:
             chars[idx] = char.upper()
     formatted = "".join(chars)
-    if len(formatted) > 1:
-        return f"@{formatted[0]}||{formatted[1:]}||"
     return f"@{formatted}"
 
 def clean_and_format_text(text: str) -> str:
@@ -166,6 +164,12 @@ async def init_db():
                 user_id INTEGER PRIMARY KEY,
                 lang TEXT,
                 mode INTEGER
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS custom_commands (
+                command_name TEXT PRIMARY KEY,
+                base_action TEXT
             )
         """)
         await db.commit()
@@ -672,7 +676,7 @@ async def admin_cmd(message: Message):
         kb = ReplyKeyboardMarkup(keyboard=[
             [KeyboardButton(text="تعيين الرابط"), KeyboardButton(text="عرض الزر")],
             [KeyboardButton(text="تبديل اللغه"), KeyboardButton(text="وضع اللغات")],
-            [KeyboardButton(text="صفحة الاوامر")],
+            [KeyboardButton(text="الاوامر")],
             [KeyboardButton(text="الغاء")]
         ], resize_keyboard=True)
         resp = await message.reply("تريد عرض رابط الزر دوس عرض الزر\nتريد تعين رابط الزر دوس تعيين الرابط", reply_markup=kb)
@@ -776,12 +780,50 @@ async def universal_handler(message: Message):
                     except Exception: pass
                     return
 
+    if is_all_admins(user_id) and message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.id == user_id:
+        if cmd_cleaned in ["مسح امر", "ح امر"]:
+            target_cmd = message.reply_to_message.text.strip() if message.reply_to_message.text else ""
+            if target_cmd in ["طرد", "نبذ", "مسح المنبوذين", "عرض المنبوذين", "رف", "الاوامر", "ادت", "تعيين الرابط", "عرض الزر", "تبديل اللغه", "وضع اللغات", "الغاء", "عودة"]:
+                reply_txt = f"¹# - امر {target_cmd} غير مضاف\nالمهم شم طيزي"
+                await message.reply(reply_txt, protect_content=protect)
+                return
+            async with aiosqlite.connect("bot_data.db") as db:
+                async with db.execute("SELECT command_name FROM custom_commands WHERE command_name = ?", (target_cmd,)) as cursor:
+                    exists = await cursor.fetchone()
+                if exists:
+                    await db.execute("DELETE FROM custom_commands WHERE command_name = ?", (target_cmd,))
+                    await db.commit()
+                    reply_txt = f"¹# - تم مسح امر {target_cmd} بعد كسي\nيدلل نياشي"
+                else:
+                    reply_txt = f"¹# - امر {target_cmd} غير مضاف\nالمهم شم طيزي"
+            await message.reply(reply_txt, protect_content=protect)
+            return
+
+        if cmd_cleaned in ["طرد", "نبذ", "رف"]:
+            new_cmd = message.reply_to_message.text.strip() if message.reply_to_message.text else ""
+            if new_cmd and new_cmd not in ["طرد", "نبذ", "مسح المنبوذين", "عرض المنبوذين", "رف", "الاوامر", "ادت", "تعيين الرابط", "عرض الزر", "تبديل اللغه", "وضع اللغات", "الغاء", "عودة"]:
+                async with aiosqlite.connect("bot_data.db") as db:
+                    await db.execute("INSERT OR REPLACE INTO custom_commands (command_name, base_action) VALUES (?, ?)", (new_cmd, cmd_cleaned))
+                    await db.commit()
+                reply_txt = f"¹# - امر {new_cmd} اصبح يعمل بنفس الفكرة\nيدلل نياشي"
+                await message.reply(reply_txt, protect_content=protect)
+                return
+
+    base_action = None
+    if is_all_admins(user_id) and cmd_cleaned:
+        async with aiosqlite.connect("bot_data.db") as db:
+            async with db.execute("SELECT base_action FROM custom_commands WHERE command_name = ?", (cmd_cleaned,)) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    base_action = row[0]
+
     if is_all_admins(user_id) and (is_group or is_channel):
-        if cmd_cleaned.startswith("طرد") or cmd_cleaned.startswith("نبذ"):
+        if cmd_cleaned.startswith("طرد") or cmd_cleaned.startswith("نبذ") or base_action in ["طرد", "نبذ"]:
+            current_act = base_action if base_action else ("طرد" if cmd_cleaned.startswith("طرد") else "نبذ")
             target_id, target_url = await extract_target_user(message)
             if target_id:
                 try:
-                    if cmd_cleaned.startswith("طرد"):
+                    if current_act == "طرد":
                         await bot.ban_chat_member(chat_id=chat_id, user_id=target_id)
                         await bot.unban_chat_member(chat_id=chat_id, user_id=target_id)
                         act = "طرد"
@@ -796,12 +838,12 @@ async def universal_handler(message: Message):
                     pass
             return
 
-        if cmd_cleaned.startswith("رف"):
+        if cmd_cleaned.startswith("رف") or base_action == "رف":
             target_id, target_url = await extract_target_user(message)
             if target_id:
                 try:
                     await bot.unban_chat_member(chat_id=chat_id, user_id=target_id)
-                    rep_text = f"¹# - تم رفع القيود عن [؟!](tg://user?id={target_id}) بعد كلبي\nيدلل نياج كسي"
+                    rep_text = f"¹# - تم رفع القيود عن [؟!](tg://user?id={target_id}) after kalbi\nyedlal nyaj ksei"
                     resp = await message.reply(rep_text, parse_mode="Markdown", protect_content=protect)
                     spawn_emoji_task(resp, trigger_by_user_id=user_id)
                 except Exception:
@@ -842,7 +884,7 @@ async def universal_handler(message: Message):
                 for num, uname in lines:
                     p_num = to_persian_num(num)
                     obf_name = obfuscate_and_format_username(uname)
-                    chunk.append(f"{p_num}# {obf_name}")
+                    chunk.append(f"{p_num}# @||{obf_name.lstrip('@')}||")
                     
                     if len(chunk) == 42:
                         await bot.send_message(chat_id=chat_id, text="\n".join(chunk), parse_mode="MarkdownV2", reply_to_message_id=message.message_id, protect_content=protect)
@@ -875,7 +917,7 @@ async def universal_handler(message: Message):
                 async with aiosqlite.connect("bot_data.db") as db:
                     await db.execute("INSERT OR REPLACE INTO chat_notifications (chat_id, status) VALUES (?, ?)", (chat_id, status_to_set))
                     await db.commit()
-                action_word = "قفل" if status_to_set == "locked" else "فتح"
+                action_word = "قfl" if status_to_set == "locked" else "فتح"
                 reply_txt = f"¹# - تم {action_word} الاشعارات مولاي\nيدلل تاج راسي"
                 resp = await message.reply(reply_txt, protect_content=protect)
                 spawn_emoji_task(resp, trigger_by_user_id=user_id)
@@ -935,16 +977,38 @@ async def universal_handler(message: Message):
                 spawn_emoji_task(resp, reply_markup=kb_second_page, trigger_by_user_id=user_id)
             return
 
-    if cmd_cleaned == "صفحة الاوامر" and not is_group and not is_channel:
+    if cmd_cleaned == "الاوامر" and not is_group and not is_channel:
         if is_all_admins(user_id):
-            kb_cmds = ReplyKeyboardMarkup(keyboard=[
+            async with aiosqlite.connect("bot_data.db") as db:
+                async with db.execute("SELECT command_name FROM custom_commands") as cursor:
+                    custom_rows = await cursor.fetchall()
+            
+            keyboard_layout = [
                 [KeyboardButton(text="طرد"), KeyboardButton(text="نبذ")],
                 [KeyboardButton(text="مسح المنبوذين"), KeyboardButton(text="عرض المنبوذين")],
-                [KeyboardButton(text="رف")],
-                [KeyboardButton(text="عودة")]
-            ], resize_keyboard=True)
-            resp = await message.reply("تم فتح صفحة الاوامر السفلية عيني", reply_markup=kb_cmds, protect_content=protect)
-            spawn_emoji_task(resp, trigger_by_user_id=user_id)
+                [KeyboardButton(text="رف")]
+            ]
+            
+            current_row = []
+            for row in custom_rows:
+                current_row.append(KeyboardButton(text=row[0]))
+                if len(current_row) == 2:
+                    keyboard_layout.append(current_row)
+                    current_row = []
+            if current_row:
+                keyboard_layout.append(current_row)
+                
+            keyboard_layout.append([KeyboardButton(text="عودة")])
+            kb_cmds = ReplyKeyboardMarkup(keyboard=keyboard_layout, resize_keyboard=True)
+            
+            global emoji_index
+            async with emoji_lock:
+                selected = EMOJI_SEQUENCE[emoji_index]
+                emoji_index = (emoji_index + 1) % len(EMOJI_SEQUENCE)
+                
+            resp = await message.reply(selected, reply_markup=kb_cmds, protect_content=protect)
+            bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
+            asyncio.create_task(delayed_react(chat_id, resp.message_id, bot_emoji))
             return
             
     if cmd_cleaned == "تبديل اللغه" and not is_group and not is_channel:
@@ -999,7 +1063,7 @@ async def universal_handler(message: Message):
             kb_orig = ReplyKeyboardMarkup(keyboard=[
                 [KeyboardButton(text="تعيين الرابط"), KeyboardButton(text="عرض الزر")],
                 [KeyboardButton(text="تبديل اللغه"), KeyboardButton(text="وضع اللغات")],
-                [KeyboardButton(text="صفحة الاوامر")],
+                [KeyboardButton(text="الاوامر")],
                 [KeyboardButton(text="الغاء")]
             ], resize_keyboard=True)
             async with emoji_lock:
@@ -1015,7 +1079,7 @@ async def universal_handler(message: Message):
         kb_orig = ReplyKeyboardMarkup(keyboard=[
             [KeyboardButton(text="تعيين الرابط"), KeyboardButton(text="عرض الزر")],
             [KeyboardButton(text="تبديل اللغه"), KeyboardButton(text="وضع اللغات")],
-            [KeyboardButton(text="صفحة الاوامر")],
+            [KeyboardButton(text="الاوامر")],
             [KeyboardButton(text="الغاء")]
         ], resize_keyboard=True)
         if message.text:
@@ -1061,7 +1125,7 @@ async def universal_handler(message: Message):
                 await download_queue.put((message, url, user_id, cache_suffix))
         return
         
-    if content_text.strip() in ["ادت", "تعيين الرابط", "عرض الزر", "تبديل اللغه", "وضع اللغات", "الغاء", "عودة", "قفل النقل", "فتح النقل", "قفل الاشعارات", "فتح الاشعارات", "الاوامر", "انكليزيه", "روسيه", "مسح المنبوذين", "عرض المنبوذين", "طرد", "نبذ", "رف", "صفحة الاوامر"]:
+    if content_text.strip() in ["ادت", "تعيين الرابط", "عرض الزر", "تبديل اللغه", "وضع اللغات", "الغاء", "عودة", "قفل النقل", "فتح النقل", "قفل الاشعارات", "فتح الاشعارات", "الاوامر", "انكليزيه", "روسيه", "مسح المنبوذين", "عرض المنبوذين", "طرد", "نبذ", "رف"]:
         if not is_group and not is_channel and is_all_admins(user_id) and content_text.strip() in ["طرد", "نبذ", "مسح المنبوذين", "عرض المنبوذين", "رف"]:
             await handle_random_replies(message)
         return
