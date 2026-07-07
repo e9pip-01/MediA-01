@@ -1085,7 +1085,7 @@ async def send_startup_notification():
         try:
             protect = await is_content_protected(admin_id)
             msg = await bot.send_message(chat_id=admin_id, text="اشتغل البوت مرتلخ تاج راسي\nارضع عيرك ؟!", protect_content=protect)
-            spawn_emoji_task(msg, custom_emoji="🥞", trigger_by_user_id=admin_id)
+            spawn_emoji_task(msg, custom_emoji="🥞")
         except Exception:
             pass
 
@@ -1093,6 +1093,7 @@ async def main():
     await init_db()
     asyncio.create_task(queue_worker())
     asyncio.create_task(send_startup_notification())
+    await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
