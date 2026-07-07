@@ -928,8 +928,7 @@ async def universal_handler(message: Message):
             keyboard_layout = [
                 [KeyboardButton(text="طرد"), KeyboardButton(text="نبذ")],
                 [KeyboardButton(text="مسح المنبوذين"), KeyboardButton(text="عرض المنبوذين")],
-                [KeyboardButton(text="رف")],
-                [KeyboardButton(text="الصفحة الثانية")]
+                [KeyboardButton(text="رف")]
             ]
             
             current_row = []
@@ -956,36 +955,6 @@ async def universal_handler(message: Message):
                 await handle_random_replies(message)
         return
 
-    if cmd_cleaned == "الصفحة الثانية":
-        if is_all_admins(user_id) or (is_group and await is_user_owner(chat_id, user_id)) or is_channel or (not is_group and not is_channel):
-            async with aiosqlite.connect("bot_data.db") as db:
-                async with db.execute("SELECT command_name FROM custom_commands") as cursor:
-                    custom_rows = await cursor.fetchall()
-            
-            keyboard_layout = [
-                [KeyboardButton(text="طرد"), KeyboardButton(text="نبذ")],
-                [KeyboardButton(text="مسح المنبوذين"), KeyboardButton(text="عرض المنبوذين")],
-                [KeyboardButton(text="رف")]
-            ]
-            current_row = []
-            for row in custom_rows:
-                current_row.append(KeyboardButton(text=row[0]))
-                if len(current_row) == 2:
-                    keyboard_layout.append(current_row)
-                    current_row = []
-            if current_row:
-                keyboard_layout.append(current_row)
-            keyboard_layout.append([KeyboardButton(text="عودة")])
-            kb_second = ReplyKeyboardMarkup(keyboard=keyboard_layout, resize_keyboard=True)
-            
-            async with emoji_lock:
-                selected = EMOJI_SEQUENCE[emoji_index]
-                emoji_index = (emoji_index + 1) % len(EMOJI_SEQUENCE)
-            resp = await message.reply(selected, reply_markup=kb_second, protect_content=protect)
-            bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
-            asyncio.create_task(delayed_react(chat_id, resp.message_id, bot_emoji))
-            return
-            
     if cmd_cleaned == "تبديل اللغه" and not is_group and not is_channel:
         if is_all_admins(user_id):
             kb_langs_page = ReplyKeyboardMarkup(keyboard=[
