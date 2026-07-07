@@ -2,16 +2,15 @@ import os
 import re
 import asyncio
 import random
-import aiosqlite
 import time
+import aiosqlite
 import mimetypes
 import urllib.parse
-import urllib.request
-import json
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, ChatMemberUpdated, CallbackQuery, InputMediaDocument
+from aiogram.types import Message, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, ChatMemberUpdated, CallbackQuery, InputMediaDocument, ReactionTypeEmoji
 from aiogram.filters import ChatMemberUpdatedFilter
 import yt_dlp
+from deep_translator import GoogleTranslator
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 bot = Bot(token=BOT_TOKEN)
@@ -44,20 +43,66 @@ EMOJI_SEQUENCE = ["🫦", "👅", "👄", "🌭", "🍔", "🍕"]
 emoji_index = 0
 emoji_lock = asyncio.Lock()
 
+SUCCESS_RESPONSES = [
+    "الميديا الردتها كدامك مولاي\nيدلل تاج راسي",
+    "يدلل بعد كسي\nترى اموت بيك اعشقك هايمه بعيرك",
+    "من اشوف زبك يسعبل كسي وتذوب الروح انزل العيرك\nذليلة امصة ولباسي مشلوح",
+    "انزع لباسي الك واكلك نيكني يبعد كل طموح شكني بعيرك\nوضرطني العافيه ترى فدوه الك اروح"
+]
+
+class ProgressTracker:
+    def __init__(self, bot: Bot, chat_id: int, message_id: int):
+        self.bot = bot
+        self.chat_id = chat_id
+        self.message_id = message_id
+        self.last_percent = 0
+
+    async def update(self, current: int, total: int):
+        if not total:
+            return
+        percent = int((current / total) * 100)
+        if (percent - self.last_percent >= 20) or (percent == 100 and self.last_percent != 100):
+            self.last_percent = percent
+            try:
+                await self.bot.edit_message_text(
+                    chat_id=self.chat_id,
+                    message_id=self.message_id,
+                    text=f"انتظر لأتمعن النظر على الرابط وتفقده\nسيتم ارسال الميديا\n\nجاري التحميل: {percent}%"
+                )
+            except Exception:
+                pass
+
 def clean_and_format_text(text: str) -> str:
     if not text:
         return ""
     if text.strip().startswith("/"):
         return text
     lowered = text.lower()
-    eng_to_upper = ['a', 't', 'n', 'g', 'f', 'u', 'l', 'j', 'm', 's']
-    rus_to_upper = ['а', 'и', 'б', 'у']
+    eng_to_upper = ['a', 't', 'n', 'g', 'f', 'u', 'j', 'm']
+    rus_to_upper = ['а', 'и', 'б']
     chars = list(lowered)
     for idx, char in enumerate(chars):
         if char in eng_to_upper or char in rus_to_upper:
             chars[idx] = char.upper()
     result_text = "".join(chars)
     filtered = re.sub(r'[^a-zA-Z0-9а-яА-ЯёЁ\u0600-\u06FF\s\-]', '', result_text)
+    filtered = re.sub(r'\s+', ' ', filtered).strip()
+    return filtered
+
+def clean_and_format_translation(text: str, target_lang: str) -> str:
+    if not text:
+        return ""
+    lowered = text.lower()
+    eng_to_upper = ['a', 't', 'n', 'g', 'f', 'u', 'j', 'm']
+    rus_to_upper = ['а', 'и', 'б']
+    chars = list(lowered)
+    for idx, char in enumerate(chars):
+        if target_lang == "en" and char in eng_to_upper:
+            chars[idx] = char.upper()
+        elif target_lang == "ru" and char in rus_to_upper:
+            chars[idx] = char.upper()
+    result_text = "".join(chars)
+    filtered = re.sub(r'[^a-zA-Z0-9а-яА-ЯёЁ\u0600-\u06FF\s\-\&\:\@\/]', '', result_text)
     filtered = re.sub(r'\s+', ' ', filtered).strip()
     return filtered
 
@@ -163,12 +208,11 @@ async def check_force_subscription(user_id: int) -> bool:
 async def get_sub_keyboard() -> InlineKeyboardMarkup:
     btn_text = await get_setting("btn_text", DEFAULT_BUTTON_TEXT)
     sub_link = await get_setting("sub_link", DEFAULT_SUBSCRIBE_LINK)
-    btn_style = await get_setting("btn_style", DEFAULT_BUTTON_STYLE)
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=btn_text, url=sub_link, style=btn_style)]])
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=btn_text, url=sub_link)]])
 
 async def get_force_sub_keyboard() -> InlineKeyboardMarkup:
     sub_link = await get_setting("sub_link", DEFAULT_SUBSCRIBE_LINK)
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="اشترك بالقناة", url=sub_link, style="success")]])
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="اشترك بالقناة", url=sub_link)]])
 
 def get_clean_url(input_str: str) -> str:
     input_str = input_str.strip()
@@ -324,50 +368,23 @@ async def live_typing_reply(message: Message, full_text: str, reply_markup=None,
         asyncio.create_task(delayed_react(chat_id, sent_msg.message_id, user_emoji))
     return sent_msg
 
-async def live_typing_progress_reply(message: Message, reply_markup=None, trigger_emoji_logic: bool = False) -> Message:
-    chat_id = message.chat.id
-    user_id = message.from_user.id if message.from_user else 0
-    protect = await is_content_protected(chat_id)
-    sent_msg = await message.reply("يتم البدء باستكشاف طلبك...\nسيتم ارسال الميديا الان", protect_content=protect)
-    if trigger_emoji_logic:
-        active_emoji_tasks[sent_msg.message_id] = None
-        spawn_emoji_task(sent_msg, trigger_by_user_id=user_id)
-    await asyncio.sleep(0.3)
-    percentage = 0
-    while percentage < 100:
-        percentage += 15
-        if percentage > 100:
-            percentage = 100
-        visible_text = f"يتم البدء باستكشاف طلبك...\nسيتم ارسال الميديا الان {percentage}%"
-        try:
-            await sent_msg.edit_text(visible_text)
-        except Exception:
-            pass
-        await asyncio.sleep(0.3)
-    if reply_markup:
-        try:
-            await sent_msg.edit_reply_markup(reply_markup=reply_markup)
-        except Exception:
-            pass
-    if sent_msg.message_id in active_emoji_tasks:
-        face_msg = active_emoji_tasks.pop(sent_msg.message_id, None)
-        if face_msg:
-            try: await face_msg.delete()
-            except Exception: pass
-    try:
-        await sent_msg.delete()
-    except Exception:
-        pass
-    return None
-
-async def extract_and_download(target: str, mute_audio: bool = False):
+async def extract_and_download(target: str, tracker: ProgressTracker, mute_audio: bool = False):
     loop = asyncio.get_event_loop()
     fmt = 'bestvideo/best' if mute_audio else 'bestvideo+bestaudio/best'
+    
+    def progress_hook(d):
+        if d['status'] == 'downloading':
+            total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
+            current = d.get('downloaded_bytes', 0)
+            if total > 0:
+                asyncio.run_coroutine_threadsafe(tracker.update(current, total), loop)
+
     ydl_opts = {
         'format': fmt, 
         'outtmpl': '%(uploader)s_tmp.%(ext)s', 
         'noplaylist': True, 
-        'quiet': True
+        'quiet': True,
+        'progress_hooks': [progress_hook]
     }
     search_target = target
     def sync_download():
@@ -422,11 +439,11 @@ async def queue_worker():
         
         sub_link = await get_setting("sub_link", DEFAULT_SUBSCRIBE_LINK)
         combined_kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="ابلاغ الدعم", url="tg://user?id=8467593882", style="danger")],
-            [InlineKeyboardButton(text="رب العالمين", url=sub_link, style="primary")]
+            [InlineKeyboardButton(text="ابلاغ الدعم", url="tg://user?id=8467593882")],
+            [InlineKeyboardButton(text="رب العالمين", url=sub_link)]
         ])
         
-        success_text = "الميديا الردتها كدامك مولاي\nيدلل تاج راسي"
+        success_text = random.choice(SUCCESS_RESPONSES)
         
         if cached_row:
             file_id, media_type, title = cached_row
@@ -472,11 +489,17 @@ async def queue_worker():
                 download_queue.task_done()
                 continue
                 
-        status_msg = await live_typing_progress_reply(message, reply_markup=None, trigger_emoji_logic=True)
+        status_msg = await message.reply("انتظر لأتمعن النظر على الرابط وتفقده\nسيتم ارسال الميديا", protect_content=protect)
+        try:
+            await status_msg.react(reactions=[ReactionTypeEmoji(emoji="🔥")])
+        except Exception:
+            pass
+
+        tracker = ProgressTracker(bot, chat_id, status_msg.message_id)
         file_path = None
         is_img_type = False
         try:
-            res = await extract_and_download(target, mute_audio=is_sticker_mode)
+            res = await extract_and_download(target, tracker, mute_audio=is_sticker_mode)
             if res and res[0]:
                 file_path, orig_title, uploader, media_id, is_img_type, actual_ext = res
                 last_sent_msg = None
@@ -535,6 +558,12 @@ async def queue_worker():
                         asyncio.create_task(delayed_react(chat_id, last_sent_msg.message_id, bot_emoji))
                         user_emoji = get_smart_reaction(last_user_reaction, chat_id)
                         asyncio.create_task(delayed_react(chat_id, last_sent_msg.message_id, user_emoji))
+                
+                try:
+                    await status_msg.delete()
+                except Exception:
+                    pass
+
                 if last_sent_msg:
                     text_msg = await message.reply(text=success_text, reply_markup=combined_kb, protect_content=protect)
                     spawn_emoji_task(text_msg, trigger_by_user_id=user_id)
@@ -543,17 +572,16 @@ async def queue_worker():
                     user_emoji = get_smart_reaction(last_user_reaction, chat_id)
                     asyncio.create_task(delayed_react(chat_id, text_msg.message_id, user_emoji))
             else:
-                if status_msg: await status_msg.delete()
-                err_msg = await live_typing_reply(message, "الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي", reply_markup=None, trigger_emoji_logic=True)
+                try: await status_msg.delete()
+                except Exception: pass
+                await live_typing_reply(message, "الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي", reply_markup=None, trigger_emoji_logic=True)
         except Exception:
-            if status_msg: await status_msg.delete()
-            err_msg = await live_typing_reply(message, "الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي", reply_markup=None, trigger_emoji_logic=True)
+            try: await status_msg.delete()
+            except Exception: pass
+            await live_typing_reply(message, "الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي", reply_markup=None, trigger_emoji_logic=True)
         finally:
             if file_path and os.path.exists(file_path):
                 try: os.remove(file_path)
-                except Exception: pass
-            if status_msg:
-                try: await status_msg.delete()
                 except Exception: pass
             async with counter_lock:
                 if user_id in user_task_counts:
@@ -566,7 +594,7 @@ async def handle_random_replies(message: Message):
     if message.chat.type == "channel":
         return
     if welcome_state:
-        kb_primary = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="المطور", url="tg://user?id=8597653867", style="primary")]])
+        kb_primary = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="المطور", url="tg://user?id=8597653867")]])
         await live_typing_reply(message, "اهلين وياك بوت MediA تريد اشتغل دز\nرابط الفيديو التريده", reply_markup=kb_primary, trigger_emoji_logic=True)
         welcome_state = False
     else:
@@ -577,29 +605,13 @@ async def translate_text(text: str, target_lang: str) -> str:
     if not text:
         return ""
     loop = asyncio.get_event_loop()
-    def google_translate():
+    def process_translation():
         try:
-            url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl={target_lang}&dt=t&q=" + urllib.parse.quote(text)
-            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req) as response:
-                res = json.loads(response.read().decode('utf-8'))
-                return "".join([sentence[0] for sentence in res[0] if sentence[0]])
+            translated = GoogleTranslator(source='auto', target=target_lang).translate(text)
+            return clean_and_format_translation(translated, target_lang)
         except Exception:
             return text
-    translated = await loop.run_in_executor(None, google_translate)
-    lowered = translated.lower()
-    eng_to_upper = ['a', 't', 'n', 'g', 'f', 'u', 'l', 'j', 'm', 's']
-    rus_to_upper = ['а', 'и', 'б', 'у']
-    chars = list(lowered)
-    for idx, char in enumerate(chars):
-        if target_lang == "en" and char in eng_to_upper:
-            chars[idx] = char.upper()
-        elif target_lang == "ru" and char in rus_to_upper:
-            chars[idx] = char.upper()
-    result_text = "".join(chars)
-    filtered = re.sub(r'[^a-zA-Z0-9а-яА-ЯёЁ\u0600-\u06FF\s\-]', '', result_text)
-    filtered = re.sub(r'\s+', ' ', filtered).strip()
-    return filtered
+    return await loop.run_in_executor(None, process_translation)
 
 @dp.message(F.text == "ادت")
 async def admin_cmd(message: Message):
@@ -637,7 +649,7 @@ async def show_commands_callback(callback: CallbackQuery):
         "فتح / الاشعارات \n"
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="مسح", callback_data=f"delete_panel:{creator_id}", style="danger")]
+        [InlineKeyboardButton(text="مسح", callback_data=f"delete_panel:{creator_id}")]
     ])
     try:
         await callback.message.edit_text(text=cmds_text, reply_markup=kb)
@@ -675,6 +687,7 @@ async def universal_handler(message: Message):
         if message.text == "/start":
             async with aiosqlite.connect("bot_data.db") as db:
                 await db.execute("INSERT OR IGNORE INTO users_log (user_id) VALUES (?)", (user_id,))
+                await db.execute("INSERT OR IGNORE INTO translation_settings (user_id, lang, mode) VALUES (?, 'en', 0)", (user_id,))
                 await db.commit()
                 
     user_emoji = get_smart_reaction(last_user_reaction, chat_id)
@@ -721,8 +734,8 @@ async def universal_handler(message: Message):
     if cmd_cleaned == "الاوامر":
         if is_all_admins(user_id) or (is_group and await is_user_owner(chat_id, user_id)) or is_channel or (not is_group and not is_channel):
             kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="قفل / فتح", callback_data=f"show_cmds:{user_id}", style="primary")],
-                [InlineKeyboardButton(text="مسح", callback_data=f"delete_panel:{user_id}", style="danger")]
+                [InlineKeyboardButton(text="قفل / فتح", callback_data=f"show_cmds:{user_id}")],
+                [InlineKeyboardButton(text="مسح", callback_data=f"delete_panel:{user_id}")]
             ])
             resp = await message.reply("الاوامر والتعليمات", reply_markup=kb, protect_content=protect)
             spawn_emoji_task(resp, trigger_by_user_id=user_id)
@@ -742,22 +755,6 @@ async def universal_handler(message: Message):
                 reply_txt = f"¹# - تم {action_word} الاشعارات مولاي\nيدلل تاج راسي"
                 resp = await message.reply(reply_txt, protect_content=protect)
                 spawn_emoji_task(resp, trigger_by_user_id=user_id)
-        else:
-            if not is_group and not is_channel:
-                has_eng_or_rus = bool(re.search(r'[a-zA-Zа-яА-ЯёЁ]', cmd_cleaned))
-                if has_eng_or_rus:
-                    async with aiosqlite.connect("bot_data.db") as db:
-                        async with db.execute("SELECT lang, mode FROM translation_settings WHERE user_id = ?", (user_id,)) as cursor:
-                            t_row = await cursor.fetchone()
-                    if t_row and t_row[1] == 1 and t_row[0]:
-                        formatted_res = await translate_text(cmd_cleaned, t_row[0])
-                    else:
-                        formatted_res = clean_and_format_text(cmd_cleaned)
-                    if formatted_res.strip():
-                        resp = await message.reply(formatted_res, protect_content=protect)
-                        spawn_emoji_task(resp, trigger_by_user_id=user_id)
-                        return
-            await handle_random_replies(message)
         return
         
     if cmd_cleaned in ["قفل النقل", "فتح النقل"]:
@@ -785,9 +782,9 @@ async def universal_handler(message: Message):
                 has_custom = await is_custom_link_set()
                 if has_custom:
                     sub_link = await get_setting("sub_link", DEFAULT_SUBSCRIBE_LINK)
-                    btn_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="اشترك بالقناة", url=sub_link, style="success")]])
+                    btn_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="اشترك بالقناة", url=sub_link)]])
                 else:
-                    btn_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="تواصل مع المطور", url=DEFAULT_SUBSCRIBE_LINK, style="success")]])
+                    btn_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="تواصل مع المطور", url=DEFAULT_SUBSCRIBE_LINK)]])
                 resp = await bot.send_message(
                     chat_id=chat_id,
                     text="اشترك بالقناة لو ماراح يشتغل\nوياك البوت ضروري عيني",
@@ -801,7 +798,7 @@ async def universal_handler(message: Message):
     if cmd_cleaned == "تبديل اللغه" and not is_group and not is_channel:
         if is_all_admins(user_id):
             kb_langs_page = ReplyKeyboardMarkup(keyboard=[
-                [KeyboardButton(text="انكليزيه"), KeyboardButton(text="روسيه")],
+                [KeyboardButton(text="انكليزيه"), KeyboardButton(text="روسيه"), KeyboardButton(text="يابانيه")],
                 [KeyboardButton(text="عودة")]
             ], resize_keyboard=True)
             async with emoji_lock:
@@ -812,13 +809,24 @@ async def universal_handler(message: Message):
             asyncio.create_task(delayed_react(chat_id, resp.message_id, bot_emoji))
             return
             
-    if cmd_cleaned in ["انكليزيه", "روسيه"] and not is_group and not is_channel:
+    if cmd_cleaned in ["انكليزيه", "روسيه", "يابانيه"] and not is_group and not is_channel:
         if is_all_admins(user_id):
-            target_lang = "en" if cmd_cleaned == "انكليزيه" else "ru"
+            if cmd_cleaned == "انكليزيه":
+                target_lang = "en"
+            elif cmd_cleaned == "روسيه":
+                target_lang = "ru"
+            else:
+                target_lang = "ja"
             async with aiosqlite.connect("bot_data.db") as db:
-                await db.execute("INSERT OR REPLACE INTO translation_settings (user_id, lang, mode) VALUES (?, ?, (SELECT mode FROM translation_settings WHERE user_id = ?))", (user_id, target_lang, user_id))
+                await db.execute("INSERT OR REPLACE INTO translation_settings (user_id, lang, mode) VALUES (?, ?, (SELECT COALESCE(mode, 0) FROM translation_settings WHERE user_id = ?))", (user_id, target_lang, user_id))
                 await db.commit()
-            resp = await message.reply("تم تبديل لغتك مثل ماتريد بعد كسي\nشم طيزي فدوه")
+            
+            kb_next_mode = ReplyKeyboardMarkup(keyboard=[
+                [KeyboardButton(text="وضع اللغات")],
+                [KeyboardButton(text="عودة")]
+            ], resize_keyboard=True)
+            
+            resp = await message.reply("تم تبديل لغتك مثل ماتريد بعد كسي\nشم طيزي فدوه", reply_markup=kb_next_mode)
             spawn_emoji_task(resp, trigger_by_user_id=user_id)
             bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
             asyncio.create_task(delayed_react(chat_id, resp.message_id, bot_emoji))
@@ -827,9 +835,9 @@ async def universal_handler(message: Message):
     if cmd_cleaned == "وضع اللغات" and not is_group and not is_channel:
         if is_all_admins(user_id):
             async with aiosqlite.connect("bot_data.db") as db:
-                await db.execute("INSERT OR REPLACE INTO translation_settings (user_id, lang, mode) VALUES (?, (SELECT lang FROM translation_settings WHERE user_id = ?), 1)", (user_id, user_id))
+                await db.execute("INSERT OR REPLACE INTO translation_settings (user_id, lang, mode) VALUES (?, (SELECT COALESCE(lang, 'en') FROM translation_settings WHERE user_id = ?), 1)", (user_id, user_id))
                 await db.commit()
-            kb_cancel_only = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="الغاء")]], resize_keyboard=True)
+            kb_cancel_only = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="عودة")]], resize_keyboard=True)
             resp = await message.reply("اي شي تكتبه هسه راح اعتبره TrANSLATioN\nوادزلك الكلام بنفس شروطك الكتابيه ولغتك", reply_markup=kb_cancel_only, protect_content=protect)
             spawn_emoji_task(resp, trigger_by_user_id=user_id)
             return
@@ -838,7 +846,7 @@ async def universal_handler(message: Message):
         if is_all_admins(user_id):
             admin_states.pop(user_id, None)
             async with aiosqlite.connect("bot_data.db") as db:
-                await db.execute("INSERT OR REPLACE INTO translation_settings (user_id, lang, mode) VALUES (?, (SELECT lang FROM translation_settings WHERE user_id = ?), 0)", (user_id, user_id))
+                await db.execute("INSERT OR REPLACE INTO translation_settings (user_id, lang, mode) VALUES (?, (SELECT COALESCE(lang, 'en') FROM translation_settings WHERE user_id = ?), 0)", (user_id, user_id))
                 await db.commit()
             resp = await message.reply("صار وتدلل\nمنو يكدر يعصيك يبعد كسي اه", reply_markup=ReplyKeyboardRemove(), protect_content=protect)
             spawn_emoji_task(resp, trigger_by_user_id=user_id)
@@ -847,6 +855,9 @@ async def universal_handler(message: Message):
     if cmd_cleaned == "عودة" and not is_group and not is_channel:
         if is_all_admins(user_id):
             admin_states.pop(user_id, None)
+            async with aiosqlite.connect("bot_data.db") as db:
+                await db.execute("INSERT OR REPLACE INTO translation_settings (user_id, lang, mode) VALUES (?, (SELECT COALESCE(lang, 'en') FROM translation_settings WHERE user_id = ?), 0)", (user_id, user_id))
+                await db.commit()
             kb_orig = ReplyKeyboardMarkup(keyboard=[
                 [KeyboardButton(text="تعيين الرابط"), KeyboardButton(text="عرض الزر")],
                 [KeyboardButton(text="تبديل اللغه"), KeyboardButton(text="وضع اللغات")],
@@ -910,13 +921,15 @@ async def universal_handler(message: Message):
                 await download_queue.put((message, url, user_id, cache_suffix))
         return
         
-    if content_text.strip() in ["ادت", "تعيين الرابط", "عرض الزر", "تبديل اللغه", "وضع اللغات", "الغاء", "عودة", "قفل النقل", "فتح النقل", "قفل الاشعارات", "فتح الاشعارات", "الاوامر", "انكليزيه", "روسيه"]:
+    if content_text.strip() in ["ادت", "تعيين الرابط", "عرض الزر", "تبديل اللغه", "وضع اللغات", "الغاء", "عودة", "قفل النقل", "فتح النقل", "قفل الاشعارات", "فتح الاشعارات", "الاوامر", "انكليزيه", "روسيه", "يابانيه"]:
         return
         
     if is_group:
         if content_text.strip() == "بوت":
             await handle_random_replies(message)
-    elif not is_channel:
+            return
+    
+    if not is_channel:
         if cmd_cleaned and not ANY_URL_REGEX.findall(cmd_cleaned):
             async with aiosqlite.connect("bot_data.db") as db:
                 async with db.execute("SELECT lang, mode FROM translation_settings WHERE user_id = ?", (user_id,)) as cursor:
