@@ -764,17 +764,36 @@ async def universal_handler(message: Message):
         if cmd_cleaned.startswith("طرد") or cmd_cleaned.startswith("نبذ") or base_action in ["طرد", "نبذ"]:
             current_act = base_action if base_action else ("طرد" if cmd_cleaned.startswith("طرد") else "نبذ")
             target_id, target_url = await extract_target_user(message)
+            
             if target_id:
+                user_markdown = f"[؟!](tg://user?id={target_id})"
                 try:
+                    member_status = "left"
+                    try:
+                        chat_member = await bot.get_chat_member(chat_id=chat_id, user_id=target_id)
+                        member_status = chat_member.status
+                    except Exception:
+                        member_status = "left"
+                    
                     if current_act == "طرد":
+                        if member_status in ["left", "kicked"]:
+                            rep_text = f"¹# - مولاي هذا {user_markdown} ماله اثر\nلو مغادر لو مطرود"
+                            resp = await message.reply(rep_text, parse_mode="Markdown", protect_content=protect)
+                            spawn_emoji_task(resp, trigger_by_user_id=user_id)
+                            return
                         await bot.ban_chat_member(chat_id=chat_id, user_id=target_id)
                         await bot.unban_chat_member(chat_id=chat_id, user_id=target_id)
                         act = "طرد"
                     else:
+                        if member_status == "kicked":
+                            rep_text = f"¹# - مولاي هذا {user_markdown} منبوذ مسبقا\nشلون اسوي وياه"
+                            resp = await message.reply(rep_text, parse_mode="Markdown", protect_content=protect)
+                            spawn_emoji_task(resp, trigger_by_user_id=user_id)
+                            return
                         await bot.ban_chat_member(chat_id=chat_id, user_id=target_id)
                         act = "نبذ"
                     
-                    rep_text = f"¹# - تم {act} هذا [؟!](tg://user?id={target_id}) after kalbi\nyedlal nyaj ksei"
+                    rep_text = f"¹# - تم {act} هذا {user_markdown} after kalbi\nyedlal nyaj ksei"
                     resp = await message.reply(rep_text, parse_mode="Markdown", protect_content=protect)
                     spawn_emoji_task(resp, trigger_by_user_id=user_id)
                 except Exception:
@@ -953,7 +972,7 @@ async def universal_handler(message: Message):
             async with aiosqlite.connect("bot_data.db") as db:
                 await db.execute("INSERT OR REPLACE INTO translation_settings (user_id, lang, mode) VALUES (?, ?, (SELECT mode FROM translation_settings WHERE user_id = ?))", (user_id, target_lang, user_id))
                 await db.commit()
-            resp = await message.reply("تم تبديل لغتك مثل ماتريد بعد كسي\nشم طيزي فدوه")
+            resp = await message.reply("تم تبديل لغتك مثل ماتريد بعد كسي\nشم طيزي فدوه", protect_content=protect)
             spawn_emoji_task(resp, trigger_by_user_id=user_id)
             bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
             asyncio.create_task(delayed_react(chat_id, resp.message_id, bot_emoji))
