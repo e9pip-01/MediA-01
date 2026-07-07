@@ -10,7 +10,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, ChatMemberUpdated, CallbackQuery, InputMediaDocument, ReactionTypeEmoji
 from aiogram.filters import ChatMemberUpdatedFilter
 import yt_dlp
-from deep_translator import GoogleTranslator
+from googletrans import Translator  # تغيير مكتبة الترجمة هنا
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 bot = Bot(token=BOT_TOKEN)
@@ -608,19 +608,22 @@ async def handle_random_replies(message: Message):
     
     await live_typing_reply(message, selected_text, reply_markup=kb_dev, trigger_emoji_logic=True)
 
+# دالة الترجمة المعدلة باستخدام مكتبة googletrans الاستقراية لعام 2026
 async def translate_text(text: str, target_lang: str) -> str:
     if not text:
         return ""
     loop = asyncio.get_event_loop()
     def process_translation():
         try:
-            translated = GoogleTranslator(source='auto', target=target_lang).translate(text)
-            return clean_and_format_translation(translated, target_lang)
+            translator = Translator()
+            translated = translator.translate(text, dest=target_lang)
+            return clean_and_format_translation(translated.text, target_lang)
         except Exception:
             return text
     return await loop.run_in_executor(None, process_translation)
 
-@dp.message(F.text == "دت")
+# فلتر يستقبل "دت" أو "ادت" لضمان ثبات عمل الأمر
+@dp.message((F.text == "دت") | (F.text == "ادت"))
 async def admin_cmd(message: Message):
     user_id = message.from_user.id if message.from_user else 0
     chat_id = message.chat.id
@@ -690,6 +693,11 @@ async def universal_handler(message: Message):
     is_channel = message.chat.type == "channel"
     protect = await is_content_protected(chat_id)
     
+    cmd_cleaned = message.text.strip() if message.text else ""
+
+    if cmd_cleaned in ["دت", "ادت"]:
+        return
+
     if user_id > 0:
         if message.text == "/start":
             async with aiosqlite.connect("bot_data.db") as db:
@@ -699,8 +707,6 @@ async def universal_handler(message: Message):
                 
     user_emoji = get_smart_reaction(last_user_reaction, chat_id)
     asyncio.create_task(delayed_react(chat_id, message.message_id, user_emoji))
-        
-    cmd_cleaned = message.text.strip() if message.text else ""
 
     is_service = (
         message.new_chat_members or 
@@ -928,7 +934,7 @@ async def universal_handler(message: Message):
                 await download_queue.put((message, url, user_id, cache_suffix))
         return
         
-    if content_text.strip() in ["ادت", "تعيين الرابط", "عرض الزر", "تبديل اللغه", "وضع اللغات", "الغاء", "عودة", "قفل النقل", "فتح النقل", "قفل الاشعارات", "فتح الاشعارات", "الاوامر", "انكليزيه", "روسيه", "يابانيه"]:
+    if content_text.strip() in ["تعيين الرابط", "عرض الزر", "تبديل اللغه", "وضع اللغات", "الغاء", "عودة", "قفل النقل", "فتح النقل", "قفل الاشعارات", "فتح الاشعارات", "الاوامر", "انكليزيه", "روسيه", "يابانيه"]:
         return
         
     if is_group:
