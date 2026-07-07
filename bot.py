@@ -20,7 +20,7 @@ download_queue = asyncio.Queue()
 user_task_counts = {}
 counter_lock = asyncio.Lock()
 
-welcome_state = True
+welcome_state = 0
 active_emoji_tasks = {}
 admin_states = {}
 
@@ -593,13 +593,20 @@ async def handle_random_replies(message: Message):
     global welcome_state
     if message.chat.type == "channel":
         return
-    if welcome_state:
-        kb_primary = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="المطور", url="tg://user?id=8597653867")]])
-        await live_typing_reply(message, "اهلين وياك بوت MediA تريد اشتغل دز\nرابط الفيديو التريده", reply_markup=kb_primary, trigger_emoji_logic=True)
-        welcome_state = False
-    else:
-        await live_typing_reply(message, "مو ناوي تستعملني وتشغلني مثل البوتات ؟!\nاضوج ترى ازعل واصيح المولاي يهينك", reply_markup=None, trigger_emoji_logic=True)
-        welcome_state = True
+        
+    kb_dev = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="المطور", url="tg://user?id=8597653867")]])
+    
+    responses_pool = [
+        "اهلين وياك بوت MediA تريد اشتغل دز\nرابط الفيديو التريده",
+        "مو ناوي تستعملني وتشغلني مثل البوتات ؟!\nاضوج ترى ازعل واصيح المولاي يهينك",
+        "من اشوف زبك يسعبل كسي وتذوب الروح انزل العيرك\nذليلة امصة ولباسي مشلوح",
+        "انزع لباسي الك واكلك نيكني يبعد كل طموح شكني بعيرك\nوضرطني العافيه ترى فدوه الك اروح"
+    ]
+    
+    selected_text = responses_pool[welcome_state]
+    welcome_state = (welcome_state + 1) % 4
+    
+    await live_typing_reply(message, selected_text, reply_markup=kb_dev, trigger_emoji_logic=True)
 
 async def translate_text(text: str, target_lang: str) -> str:
     if not text:
@@ -613,7 +620,7 @@ async def translate_text(text: str, target_lang: str) -> str:
             return text
     return await loop.run_in_executor(None, process_translation)
 
-@dp.message(F.text == "ادت")
+@dp.message(F.text == "دت")
 async def admin_cmd(message: Message):
     user_id = message.from_user.id if message.from_user else 0
     chat_id = message.chat.id
@@ -735,7 +742,7 @@ async def universal_handler(message: Message):
         if is_all_admins(user_id) or (is_group and await is_user_owner(chat_id, user_id)) or is_channel or (not is_group and not is_channel):
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="قفل / فتح", callback_data=f"show_cmds:{user_id}")],
-                [InlineKeyboardButton(text="مسح", callback_data=f"delete_panel:{user_id}")]
+                [InlineKeyboardButton(text="مسح", callback_data=f"delete_panel:{user_id}")],
             ])
             resp = await message.reply("الاوامر والتعليمات", reply_markup=kb, protect_content=protect)
             spawn_emoji_task(resp, trigger_by_user_id=user_id)
@@ -938,6 +945,7 @@ async def universal_handler(message: Message):
                 formatted_res = await translate_text(cmd_cleaned, t_row[0])
                 if formatted_res.strip():
                     resp = await message.reply(formatted_res, protect_content=protect)
+                    # هنا جعلنا رسالة الإيموجي المتناوبة الكبيرة (البرجر والشفايف إلخ) هي الوحيدة التي يتم إرسالها ولا ينزل للأسفل
                     spawn_emoji_task(resp, trigger_by_user_id=user_id)
                     return
             else:
