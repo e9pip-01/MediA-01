@@ -10,7 +10,6 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, ChatMemberUpdated, CallbackQuery, InputMediaDocument, ReactionTypeEmoji
 from aiogram.filters import ChatMemberUpdatedFilter
 import yt_dlp
-from googletrans import Translator  # تغيير مكتبة الترجمة هنا
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 bot = Bot(token=BOT_TOKEN)
@@ -89,23 +88,6 @@ def clean_and_format_text(text: str) -> str:
     filtered = re.sub(r'\s+', ' ', filtered).strip()
     return filtered
 
-def clean_and_format_translation(text: str, target_lang: str) -> str:
-    if not text:
-        return ""
-    lowered = text.lower()
-    eng_to_upper = ['a', 't', 'n', 'g', 'f', 'u', 'j', 'm']
-    rus_to_upper = ['а', 'и', 'б']
-    chars = list(lowered)
-    for idx, char in enumerate(chars):
-        if target_lang == "en" and char in eng_to_upper:
-            chars[idx] = char.upper()
-        elif target_lang == "ru" and char in rus_to_upper:
-            chars[idx] = char.upper()
-    result_text = "".join(chars)
-    filtered = re.sub(r'[^a-zA-Z0-9а-яА-ЯёЁ\u0600-\u06FF\s\-\&\:\@\/]', '', result_text)
-    filtered = re.sub(r'\s+', ' ', filtered).strip()
-    return filtered
-
 async def init_db():
     async with aiosqlite.connect("bot_data.db") as db:
         await db.execute("""
@@ -145,13 +127,6 @@ async def init_db():
             CREATE TABLE IF NOT EXISTS chat_protection (
                 chat_id INTEGER PRIMARY KEY,
                 status TEXT
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS translation_settings (
-                user_id INTEGER PRIMARY KEY,
-                lang TEXT,
-                mode INTEGER
             )
         """)
         await db.commit()
@@ -608,21 +583,6 @@ async def handle_random_replies(message: Message):
     
     await live_typing_reply(message, selected_text, reply_markup=kb_dev, trigger_emoji_logic=True)
 
-# دالة الترجمة المعدلة باستخدام مكتبة googletrans الاستقراية لعام 2026
-async def translate_text(text: str, target_lang: str) -> str:
-    if not text:
-        return ""
-    loop = asyncio.get_event_loop()
-    def process_translation():
-        try:
-            translator = Translator()
-            translated = translator.translate(text, dest=target_lang)
-            return clean_and_format_translation(translated.text, target_lang)
-        except Exception:
-            return text
-    return await loop.run_in_executor(None, process_translation)
-
-# فلتر يستقبل "دت" أو "ادت" لضمان ثبات عمل الأمر
 @dp.message((F.text == "دت") | (F.text == "ادت"))
 async def admin_cmd(message: Message):
     user_id = message.from_user.id if message.from_user else 0
@@ -636,7 +596,6 @@ async def admin_cmd(message: Message):
     if is_all_admins(user_id):
         kb = ReplyKeyboardMarkup(keyboard=[
             [KeyboardButton(text="تعيين الرابط"), KeyboardButton(text="عرض الزر")],
-            [KeyboardButton(text="تبديل اللغه"), KeyboardButton(text="وضع اللغات")],
             [KeyboardButton(text="الغاء")]
         ], resize_keyboard=True)
         resp = await message.reply("تريد عرض رابط الزر دوس عرض الزر\nتريد تعين رابط الزر دوس تعيين الرابط", reply_markup=kb)
@@ -702,7 +661,6 @@ async def universal_handler(message: Message):
         if message.text == "/start":
             async with aiosqlite.connect("bot_data.db") as db:
                 await db.execute("INSERT OR IGNORE INTO users_log (user_id) VALUES (?)", (user_id,))
-                await db.execute("INSERT OR IGNORE INTO translation_settings (user_id, lang, mode) VALUES (?, 'en', 0)", (user_id,))
                 await db.commit()
                 
     user_emoji = get_smart_reaction(last_user_reaction, chat_id)
@@ -808,59 +766,9 @@ async def universal_handler(message: Message):
                 spawn_emoji_task(resp, reply_markup=kb_second_page, trigger_by_user_id=user_id)
             return
             
-    if cmd_cleaned == "تبديل اللغه" and not is_group and not is_channel:
-        if is_all_admins(user_id):
-            kb_langs_page = ReplyKeyboardMarkup(keyboard=[
-                [KeyboardButton(text="انكليزيه"), KeyboardButton(text="روسيه"), KeyboardButton(text="يابانيه")],
-                [KeyboardButton(text="عودة")]
-            ], resize_keyboard=True)
-            async with emoji_lock:
-                selected = EMOJI_SEQUENCE[emoji_index]
-                emoji_index = (emoji_index + 1) % len(EMOJI_SEQUENCE)
-            resp = await message.reply(selected, reply_markup=kb_langs_page, protect_content=protect)
-            bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
-            asyncio.create_task(delayed_react(chat_id, resp.message_id, bot_emoji))
-            return
-            
-    if cmd_cleaned in ["انكليزيه", "روسيه", "يابانيه"] and not is_group and not is_channel:
-        if is_all_admins(user_id):
-            if cmd_cleaned == "انكليزيه":
-                target_lang = "en"
-            elif cmd_cleaned == "روسيه":
-                target_lang = "ru"
-            else:
-                target_lang = "ja"
-            async with aiosqlite.connect("bot_data.db") as db:
-                await db.execute("INSERT OR REPLACE INTO translation_settings (user_id, lang, mode) VALUES (?, ?, (SELECT COALESCE(mode, 0) FROM translation_settings WHERE user_id = ?))", (user_id, target_lang, user_id))
-                await db.commit()
-            
-            kb_next_mode = ReplyKeyboardMarkup(keyboard=[
-                [KeyboardButton(text="وضع اللغات")],
-                [KeyboardButton(text="عودة")]
-            ], resize_keyboard=True)
-            
-            resp = await message.reply("تم تبديل لغتك مثل ماتريد بعد كسي\nشم طيزي فدوه", reply_markup=kb_next_mode)
-            spawn_emoji_task(resp, trigger_by_user_id=user_id)
-            bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
-            asyncio.create_task(delayed_react(chat_id, resp.message_id, bot_emoji))
-            return
-
-    if cmd_cleaned == "وضع اللغات" and not is_group and not is_channel:
-        if is_all_admins(user_id):
-            async with aiosqlite.connect("bot_data.db") as db:
-                await db.execute("INSERT OR REPLACE INTO translation_settings (user_id, lang, mode) VALUES (?, (SELECT COALESCE(lang, 'en') FROM translation_settings WHERE user_id = ?), 1)", (user_id, user_id))
-                await db.commit()
-            kb_cancel_only = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="عودة")]], resize_keyboard=True)
-            resp = await message.reply("اي شي تكتبه هسه راح اعتبره TrANSLATioN\nوادزلك الكلام بنفس شروطك الكتابيه ولغتك", reply_markup=kb_cancel_only, protect_content=protect)
-            spawn_emoji_task(resp, trigger_by_user_id=user_id)
-            return
-            
     if cmd_cleaned == "الغاء" and not is_group and not is_channel:
         if is_all_admins(user_id):
             admin_states.pop(user_id, None)
-            async with aiosqlite.connect("bot_data.db") as db:
-                await db.execute("INSERT OR REPLACE INTO translation_settings (user_id, lang, mode) VALUES (?, (SELECT COALESCE(lang, 'en') FROM translation_settings WHERE user_id = ?), 0)", (user_id, user_id))
-                await db.commit()
             resp = await message.reply("صار وتدلل\nمنو يكدر يعصيك يبعد كسي اه", reply_markup=ReplyKeyboardRemove(), protect_content=protect)
             spawn_emoji_task(resp, trigger_by_user_id=user_id)
             return
@@ -868,12 +776,8 @@ async def universal_handler(message: Message):
     if cmd_cleaned == "عودة" and not is_group and not is_channel:
         if is_all_admins(user_id):
             admin_states.pop(user_id, None)
-            async with aiosqlite.connect("bot_data.db") as db:
-                await db.execute("INSERT OR REPLACE INTO translation_settings (user_id, lang, mode) VALUES (?, (SELECT COALESCE(lang, 'en') FROM translation_settings WHERE user_id = ?), 0)", (user_id, user_id))
-                await db.commit()
             kb_orig = ReplyKeyboardMarkup(keyboard=[
                 [KeyboardButton(text="تعيين الرابط"), KeyboardButton(text="عرض الزر")],
-                [KeyboardButton(text="تبديل اللغه"), KeyboardButton(text="وضع اللغات")],
                 [KeyboardButton(text="الغاء")]
             ], resize_keyboard=True)
             async with emoji_lock:
@@ -888,7 +792,6 @@ async def universal_handler(message: Message):
         admin_states.pop(user_id, None)
         kb_orig = ReplyKeyboardMarkup(keyboard=[
             [KeyboardButton(text="تعيين الرابط"), KeyboardButton(text="عرض الزر")],
-            [KeyboardButton(text="تبديل اللغه"), KeyboardButton(text="وضع اللغات")],
             [KeyboardButton(text="الغاء")]
         ], resize_keyboard=True)
         if message.text:
@@ -934,7 +837,7 @@ async def universal_handler(message: Message):
                 await download_queue.put((message, url, user_id, cache_suffix))
         return
         
-    if content_text.strip() in ["تعيين الرابط", "عرض الزر", "تبديل اللغه", "وضع اللغات", "الغاء", "عودة", "قفل النقل", "فتح النقل", "قفل الاشعارات", "فتح الاشعارات", "الاوامر", "انكليزيه", "روسيه", "يابانيه"]:
+    if content_text.strip() in ["تعيين الرابط", "عرض الزر", "الغاء", "عودة", "قفل النقل", "فتح النقل", "قفل الاشعارات", "فتح الاشعارات", "الاوامر"]:
         return
         
     if is_group:
@@ -944,23 +847,13 @@ async def universal_handler(message: Message):
     
     if not is_channel:
         if cmd_cleaned and not ANY_URL_REGEX.findall(cmd_cleaned):
-            async with aiosqlite.connect("bot_data.db") as db:
-                async with db.execute("SELECT lang, mode FROM translation_settings WHERE user_id = ?", (user_id,)) as cursor:
-                    t_row = await cursor.fetchone()
-            if t_row and t_row[1] == 1 and t_row[0]:
-                formatted_res = await translate_text(cmd_cleaned, t_row[0])
+            has_eng_or_rus = bool(re.search(r'[a-zA-Zа-яА-ЯёЁ]', cmd_cleaned))
+            if has_eng_or_rus:
+                formatted_res = clean_and_format_text(cmd_cleaned)
                 if formatted_res.strip():
                     resp = await message.reply(formatted_res, protect_content=protect)
                     spawn_emoji_task(resp, trigger_by_user_id=user_id)
                     return
-            else:
-                has_eng_or_rus = bool(re.search(r'[a-zA-Zа-яА-ЯёЁ]', cmd_cleaned))
-                if has_eng_or_rus:
-                    formatted_res = clean_and_format_text(cmd_cleaned)
-                    if formatted_res.strip():
-                        resp = await message.reply(formatted_res, protect_content=protect)
-                        spawn_emoji_task(resp, trigger_by_user_id=user_id)
-                        return
         await handle_random_replies(message)
 
 async def send_startup_notification():
