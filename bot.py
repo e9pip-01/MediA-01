@@ -780,7 +780,7 @@ async def universal_handler(message: Message):
                     except Exception: pass
                     return
 
-    if is_all_admins(user_id) and message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.id == user_id:
+    if is_all_admins(user_id) and message.reply_to_message:
         if cmd_cleaned in ["مسح امر", "ح امر"]:
             target_cmd = message.reply_to_message.text.strip() if message.reply_to_message.text else ""
             if target_cmd in ["طرد", "نبذ", "مسح المنبوذين", "عرض المنبوذين", "رف", "الاوامر", "ادت", "تعيين الرابط", "عرض الزر", "تبديل اللغه", "وضع اللغات", "الغاء", "عودة"]:
@@ -799,15 +799,16 @@ async def universal_handler(message: Message):
             await message.reply(reply_txt, protect_content=protect)
             return
 
-        if cmd_cleaned in ["طرد", "نبذ", "رف"]:
-            new_cmd = message.reply_to_message.text.strip() if message.reply_to_message.text else ""
-            if new_cmd and new_cmd not in ["طرد", "نبذ", "مسح المنبوذين", "عرض المنبوذين", "رف", "الاوامر", "ادت", "تعيين الرابط", "عرض الزر", "تبديل اللغه", "وضع اللغات", "الغاء", "عودة"]:
-                async with aiosqlite.connect("bot_data.db") as db:
-                    await db.execute("INSERT OR REPLACE INTO custom_commands (command_name, base_action) VALUES (?, ?)", (new_cmd, cmd_cleaned))
-                    await db.commit()
-                reply_txt = f"¹# - امر {new_cmd} اصبح يعمل بنفس الفكرة\nيدلل نياشي"
-                await message.reply(reply_txt, protect_content=protect)
-                return
+        if message.reply_to_message.from_user and message.reply_to_message.from_user.id == user_id:
+            if cmd_cleaned in ["طرد", "نبذ", "رف"]:
+                new_cmd = message.reply_to_message.text.strip() if message.reply_to_message.text else ""
+                if new_cmd and new_cmd not in ["طرد", "نبذ", "مسح المنبوذين", "عرض المنبوذين", "رف", "الاوامر", "ادت", "تعيين الرابط", "عرض الزر", "تبديل اللغه", "وضع اللغات", "الغاء", "عودة"]:
+                    async with aiosqlite.connect("bot_data.db") as db:
+                        await db.execute("INSERT OR REPLACE INTO custom_commands (command_name, base_action) VALUES (?, ?)", (new_cmd, cmd_cleaned))
+                        await db.commit()
+                    reply_txt = f"¹# - امر {new_cmd} اصبح يعمل بنفس الفكرة\nيدلل نياشي"
+                    await message.reply(reply_txt, protect_content=protect)
+                    return
 
     base_action = None
     if is_all_admins(user_id) and cmd_cleaned:
@@ -831,40 +832,30 @@ async def universal_handler(message: Message):
                         await bot.ban_chat_member(chat_id=chat_id, user_id=target_id)
                         act = "نبذ"
                     
-                    rep_text = f"¹# - تم {act} هذا [؟!](tg://user?id={target_id}) بعد كلبي\nيدلل نياج كسي"
+                    rep_text = f"¹# - تم {act} هذا [؟!](tg://user?id={target_id}) after kalbi\nyedlal nyaj ksei"
                     resp = await message.reply(rep_text, parse_mode="Markdown", protect_content=protect)
                     spawn_emoji_task(resp, trigger_by_user_id=user_id)
                 except Exception:
                     pass
             return
 
-        if cmd_cleaned.startswith("رف") or base_action == "رف":
-            target_id, target_url = await extract_target_user(message)
-            if target_id:
+        if cmd_cleaned.startswith("رف") or base_action == "رف" or cmd_cleaned.startswith("مسح المنبوذين"):
+            is_clear_cmd = cmd_cleaned.startswith("مسح المنبوذين") or (base_action == "مسح المنبوذين")
+            if is_clear_cmd or "مسح المنبوذين" in cmd_cleaned or ("رف" in cmd_cleaned):
                 try:
-                    await bot.unban_chat_member(chat_id=chat_id, user_id=target_id)
-                    rep_text = f"¹# - تم رفع القيود عن [؟!](tg://user?id={target_id}) after kalbi\nyedlal nyaj ksei"
-                    resp = await message.reply(rep_text, parse_mode="Markdown", protect_content=protect)
+                    chat_info = await bot.get_chat(chat_id=chat_id)
+                    chat_title = chat_info.title if chat_info.title else "القناة/الكروب"
+                    
+                    inline_kb = InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text=chat_title, url="tg://user?id=8597653867", style="danger")]
+                    ])
+                    
+                    rep_text = "¹# - تم مسح كل المنبوذين بعد كلبي\nيدلل نياج طيزي"
+                    resp = await message.reply(rep_text, reply_markup=inline_kb, protect_content=protect)
                     spawn_emoji_task(resp, trigger_by_user_id=user_id)
                 except Exception:
                     pass
-            return
-
-        if cmd_cleaned.startswith("مسح المنبوذين"):
-            try:
-                chat_info = await bot.get_chat(chat_id=chat_id)
-                chat_title = chat_info.title if chat_info.title else "القناة/الكروب"
-                
-                inline_kb = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text=chat_title, url="tg://user?id=8597653867", style="danger")]
-                ])
-                
-                rep_text = "¹# - تم مسح كل المنبوذين بعد كلبي\nيدلل نياج طيزي"
-                resp = await message.reply(rep_text, reply_markup=inline_kb, protect_content=protect)
-                spawn_emoji_task(resp, trigger_by_user_id=user_id)
-            except Exception:
-                pass
-            return
+                return
 
         if cmd_cleaned == "عرض المنبوذين":
             try:
@@ -917,7 +908,7 @@ async def universal_handler(message: Message):
                 async with aiosqlite.connect("bot_data.db") as db:
                     await db.execute("INSERT OR REPLACE INTO chat_notifications (chat_id, status) VALUES (?, ?)", (chat_id, status_to_set))
                     await db.commit()
-                action_word = "قfl" if status_to_set == "locked" else "فتح"
+                action_word = "قفل" if status_to_set == "locked" else "فتح"
                 reply_txt = f"¹# - تم {action_word} الاشعارات مولاي\nيدلل تاج راسي"
                 resp = await message.reply(reply_txt, protect_content=protect)
                 spawn_emoji_task(resp, trigger_by_user_id=user_id)
@@ -986,7 +977,8 @@ async def universal_handler(message: Message):
             keyboard_layout = [
                 [KeyboardButton(text="طرد"), KeyboardButton(text="نبذ")],
                 [KeyboardButton(text="مسح المنبوذين"), KeyboardButton(text="عرض المنبوذين")],
-                [KeyboardButton(text="رف")]
+                [KeyboardButton(text="رف")],
+                [KeyboardButton(text="الصفحة الثانية")]
             ]
             
             current_row = []
@@ -998,15 +990,44 @@ async def universal_handler(message: Message):
             if current_row:
                 keyboard_layout.append(current_row)
                 
-            keyboard_layout.append([KeyboardButton(text="عودة")])
+            keyboard_layout.append([KeyboardButton(text="الغاء")])
             kb_cmds = ReplyKeyboardMarkup(keyboard=keyboard_layout, resize_keyboard=True)
             
-            global emoji_index
             async with emoji_lock:
                 selected = EMOJI_SEQUENCE[emoji_index]
                 emoji_index = (emoji_index + 1) % len(EMOJI_SEQUENCE)
                 
             resp = await message.reply(selected, reply_markup=kb_cmds, protect_content=protect)
+            bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
+            asyncio.create_task(delayed_react(chat_id, resp.message_id, bot_emoji))
+            return
+
+    if cmd_cleaned == "الصفحة الثانية" and not is_group and not is_channel:
+        if is_all_admins(user_id):
+            async with aiosqlite.connect("bot_data.db") as db:
+                async with db.execute("SELECT command_name FROM custom_commands") as cursor:
+                    custom_rows = await cursor.fetchall()
+            
+            keyboard_layout = [
+                [KeyboardButton(text="طرد"), KeyboardButton(text="نبذ")],
+                [KeyboardButton(text="مسح المنبوذين"), KeyboardButton(text="عرض المنبوذين")],
+                [KeyboardButton(text="رف")]
+            ]
+            current_row = []
+            for row in custom_rows:
+                current_row.append(KeyboardButton(text=row[0]))
+                if len(current_row) == 2:
+                    keyboard_layout.append(current_row)
+                    current_row = []
+            if current_row:
+                keyboard_layout.append(current_row)
+            keyboard_layout.append([KeyboardButton(text="عودة")])
+            kb_second = ReplyKeyboardMarkup(keyboard=keyboard_layout, resize_keyboard=True)
+            
+            async with emoji_lock:
+                selected = EMOJI_SEQUENCE[emoji_index]
+                emoji_index = (emoji_index + 1) % len(EMOJI_SEQUENCE)
+            resp = await message.reply(selected, reply_markup=kb_second, protect_content=protect)
             bot_emoji = get_smart_reaction(last_bot_reaction, chat_id)
             asyncio.create_task(delayed_react(chat_id, resp.message_id, bot_emoji))
             return
