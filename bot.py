@@ -11,7 +11,7 @@ from aiogram.client.default import DefaultBotProperties
 from yt_dlp import YoutubeDL
 
 import STriNGs
-import DATAbase
+import dATAbAse
 
 TOKEN = os.getenv("BOT_TOKEN")
 
@@ -40,6 +40,16 @@ async def trigger_delayed_reaction(bot_instance: Bot, chat_id: int, message_id: 
             message_id=message_id,
             reaction=[types.ReactionTypeEmoji(emoji=reaction_emoji)]
         )
+    except Exception:
+        pass
+
+async def send_sequential_food_emoji(chat_id: int):
+    try:
+        await asyncio.sleep(2.4)
+        idx = await dATAbAse.get_next_emoji_index()
+        emoji = STriNGs.FOOD_EMOJIS[idx]
+        sent = await bot.send_message(chat_id=chat_id, text=emoji)
+        asyncio.create_task(trigger_delayed_reaction(bot, sent.chat.id, sent.message_id))
     except Exception:
         pass
 
@@ -99,12 +109,8 @@ async def animate_text(message: types.Message, text: str, reply_markup: types.In
             pass
 
     try:
-        if keyboard_markup:
-            await sent_msg.edit_text(text, reply_markup=reply_markup)
-            sent_kb = await message.reply("🍣", reply_markup=keyboard_markup)
-            asyncio.create_task(trigger_delayed_reaction(bot, sent_kb.chat.id, sent_kb.message_id))
-        else:
-            await sent_msg.edit_text(text, reply_markup=reply_markup)
+        await sent_msg.edit_text(text, reply_markup=reply_markup)
+        asyncio.create_task(send_sequential_food_emoji(message.chat.id))
     except Exception:
         pass
 
@@ -172,7 +178,7 @@ def process_custom_languages(text: str) -> str:
                     result.append(char.upper())
                 else:
                     result.append(char.lower())
-            elif char in 'абвгдеёжзийклмнопрстуфхцчшщъыьэюяАБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ':
+            elif char in 'عبدفغهخحجكمنتبالبيسشظزوةىلارؤءئإلأآلإ':
                 if char.lower() in ['а', 'и', 'б']:
                     result.append(char.upper())
                 else:
@@ -183,11 +189,41 @@ def process_custom_languages(text: str) -> str:
             result.append(char)
     return "".join(result)
 
+def validate_custom_username(text: str) -> bool:
+    clean = text.replace("@", "").strip()
+    if not clean:
+        return False
+    if clean[0].isdigit() or clean[0] == '-' or clean[-1] == '-':
+        return False
+    if not re.match(r'^[a-zA-Z0-9_\-]+$', clean):
+        return False
+    return True
+
+async def check_force_subscription(user_id: int) -> bool:
+    link = await dATAbAse.get_force_sub_link()
+    if not link:
+        return True
+    chat_identifier = link
+    if "t.me/" in link:
+        parts = link.split("t.me/")
+        if len(parts) > 1:
+            chat_identifier = f"@{parts[1].split('/')[0]}"
+    else:
+        if not chat_identifier.startswith("@"):
+            chat_identifier = f"@{chat_identifier}"
+    try:
+        member = await bot.get_chat_member(chat_id=chat_identifier, user_id=user_id)
+        if member.status in ['creator', 'administrator', 'member']:
+            return True
+        return False
+    except Exception:
+        return False
+
 async def process_download_task(message: types.Message, url_text: str):
     asyncio.create_task(trigger_delayed_reaction(bot, message.chat.id, message.message_id))
     user_id = message.from_user.id if message.from_user else message.chat.id
     
-    cached_ids = await DATAbase.get_cached_file_ids(url_text)
+    cached_ids = await dATAbAse.get_cached_file_ids(url_text)
     if cached_ids:
         try:
             chunks = [cached_ids[i:i + 8] for i in range(0, len(cached_ids), 8)]
@@ -206,6 +242,7 @@ async def process_download_task(message: types.Message, url_text: str):
 
             sent_succ = await message.reply(STriNGs.SUCCESS_MESSAGE)
             asyncio.create_task(trigger_delayed_reaction(bot, sent_succ.chat.id, sent_succ.message_id))
+            asyncio.create_task(send_sequential_food_emoji(message.chat.id))
             return
         except Exception:
             pass
@@ -225,7 +262,7 @@ async def process_download_task(message: types.Message, url_text: str):
             downloaded = d.get('downloaded_bytes', 0)
             if total > 0:
                 percent = int((downloaded / total) * 100)
-                if percent >= 20 and percent >= last_reported_progress + 20:
+                if percent > 10 and percent >= last_reported_progress + 20:
                     last_reported_progress = (percent // 20) * 20
                     asyncio.run_coroutine_threadsafe(
                         progress_msg.edit_text(STriNGs.PROGRESS_TEMPLATE.format(percent=last_reported_progress)),
@@ -290,17 +327,20 @@ async def process_download_task(message: types.Message, url_text: str):
                             uploaded_file_ids.append(sent_msg.document.file_id)
             
             if uploaded_file_ids:
-                await DATAbase.save_cached_file_ids(url_text, uploaded_file_ids)
+                await dATAbAse.save_cached_file_ids(url_text, uploaded_file_ids)
                 
             sent_final = await message.reply(STriNGs.SUCCESS_MESSAGE)
             asyncio.create_task(trigger_delayed_reaction(bot, sent_final.chat.id, sent_final.message_id))
+            asyncio.create_task(send_sequential_food_emoji(message.chat.id))
         else:
             sent_err = await message.reply(STriNGs.FILE_NOT_FOUND)
             asyncio.create_task(trigger_delayed_reaction(bot, sent_err.chat.id, sent_err.message_id))
+            asyncio.create_task(send_sequential_food_emoji(message.chat.id))
             
     except Exception:
         try:
             await progress_msg.edit_text(STriNGs.ERROR_MESSAGE)
+            asyncio.create_task(send_sequential_food_emoji(message.chat.id))
         except Exception:
             pass
     finally:
@@ -324,7 +364,7 @@ async def user_queue_worker(user_id: int):
 
 @dp.message(F.content_type.in_({'new_chat_members', 'left_chat_member', 'new_chat_title', 'new_chat_photo', 'delete_chat_photo', 'group_chat_created', 'supergroup_chat_created', 'channel_chat_created', 'migrate_to_chat_id', 'migrate_from_chat_id', 'pinned_message'}))
 async def handle_service_messages(message: types.Message):
-    status = await DATAbase.get_notification_status(message.chat.id)
+    status = await dATAbAse.get_notification_status(message.chat.id)
     if status == 1:
         try:
             await message.delete()
@@ -339,29 +379,87 @@ async def handle_message(message: types.Message):
     chat_id = message.chat.id
     chat_type = message.chat.type
     
+    current_admin_state = await dATAbAse.get_admin_state(user_id)
+    if current_admin_state == "wait_link" and await STriNGs.is_user_allowed_for_edit(message):
+        is_link_input = text.startswith("http://") or text.startswith("https://") or "t.me/" in text
+        is_user_input = text.startswith("@") or validate_custom_username(text)
+        
+        if is_link_input or is_user_input:
+            await dATAbAse.set_force_sub_link(text)
+            await dATAbAse.set_admin_state(user_id, "none")
+            sent_ok = await message.reply(STriNGs.SET_LINK_SUCCESS_MSG, reply_markup=types.ReplyKeyboardRemove())
+            asyncio.create_task(trigger_delayed_reaction(bot, sent_ok.chat.id, sent_ok.message_id))
+            asyncio.create_task(send_sequential_food_emoji(message.chat.id))
+        else:
+            await dATAbAse.set_admin_state(user_id, "none")
+            sent_fail = await message.reply(STriNGs.INVALID_LINK_MSG, reply_markup=types.ReplyKeyboardRemove())
+            asyncio.create_task(trigger_delayed_reaction(bot, sent_fail.chat.id, sent_fail.message_id))
+            asyncio.create_task(send_sequential_food_emoji(message.chat.id))
+        return
+
+    if text == "ادت البوت":
+        if await STriNGs.is_user_allowed_for_edit(message):
+            asyncio.create_task(trigger_delayed_reaction(bot, message.chat.id, message.message_id))
+            sent_pnl = await message.reply(STriNGs.BOT_EDIT_PANEL_MSG, reply_markup=STriNGs.get_bot_edit_keyboard())
+            asyncio.create_task(trigger_delayed_reaction(bot, sent_pnl.chat.id, sent_pnl.message_id))
+            asyncio.create_task(send_sequential_food_emoji(message.chat.id))
+        return
+
+    if text == STriNGs.BTN_SET_LINK:
+        if await STriNGs.is_user_allowed_for_edit(message):
+            await dATAbAse.set_admin_state(user_id, "wait_link")
+            sent_ask = await message.reply(STriNGs.ASK_LINK_MSG)
+            asyncio.create_task(trigger_delayed_reaction(bot, sent_ask.chat.id, sent_ask.message_id))
+            asyncio.create_task(send_sequential_food_emoji(message.chat.id))
+        return
+
+    if text == STriNGs.BTN_SHOW_MSG:
+        if await STriNGs.is_user_allowed_for_edit(message):
+            current_link = await dATAbAse.get_force_sub_link()
+            inline_kb = await STriNGs.get_force_sub_inline(current_link)
+            sent_show = await message.reply(STriNGs.FORCE_SUB_TEXT, reply_markup=inline_kb)
+            asyncio.create_task(trigger_delayed_reaction(bot, sent_show.chat.id, sent_show.message_id))
+            asyncio.create_task(send_sequential_food_emoji(message.chat.id))
+        return
+
+    if not await check_force_subscription(user_id):
+        current_link = await dATAbAse.get_force_sub_link()
+        inline_kb = await STriNGs.get_force_sub_inline(current_link)
+        sent_sub = await message.reply(STriNGs.FORCE_SUB_TEXT, reply_markup=inline_kb)
+        asyncio.create_task(trigger_delayed_reaction(bot, sent_sub.chat.id, sent_sub.message_id))
+        asyncio.create_task(send_sequential_food_emoji(message.chat.id))
+        return
+
     if text.lower() == "ادت":
         if await STriNGs.is_user_allowed_for_edit(message):
-            await animate_text(message, STriNGs.PANEL_TITLE_MSG, reply_markup=None, keyboard_markup=STriNGs.get_keyboard_markup())
+            asyncio.create_task(trigger_delayed_reaction(bot, message.chat.id, message.message_id))
+            sent_edit = await message.reply(STriNGs.PANEL_TITLE_MSG, reply_markup=STriNGs.get_keyboard_markup())
+            asyncio.create_task(trigger_delayed_reaction(bot, sent_edit.chat.id, sent_edit.message_id))
+            asyncio.create_task(send_sequential_food_emoji(message.chat.id))
         return
 
     if text == STriNGs.BTN_MUTE:
         if await STriNGs.is_user_allowed_for_edit(message):
-            await DATAbase.set_notification_status(chat_id, 1)
+            await dATAbAse.set_notification_status(chat_id, 1)
             sent_resp = await message.reply(STriNGs.MUTE_SUCCESS_MSG, reply_markup=types.ReplyKeyboardRemove())
             asyncio.create_task(trigger_delayed_reaction(bot, sent_resp.chat.id, sent_resp.message_id))
+            asyncio.create_task(send_sequential_food_emoji(message.chat.id))
         return
 
     if text == STriNGs.BTN_UNMUTE:
         if await STriNGs.is_user_allowed_for_edit(message):
-            await DATAbase.set_notification_status(chat_id, 0)
+            await dATAbAse.set_notification_status(chat_id, 0)
             sent_resp = await message.reply(STriNGs.UNMUTE_SUCCESS_MSG, reply_markup=types.ReplyKeyboardRemove())
             asyncio.create_task(trigger_delayed_reaction(bot, sent_resp.chat.id, sent_resp.message_id))
+            asyncio.create_task(send_sequential_food_emoji(message.chat.id))
         return
 
     if text == STriNGs.BTN_CANCEL:
         if await STriNGs.is_user_allowed_for_edit(message):
+            await dATAbAse.set_admin_state(user_id, "none")
             sent_resp = await message.reply(STriNGs.CANCEL_SUCCESS_MSG, reply_markup=types.ReplyKeyboardRemove())
             asyncio.create_task(trigger_delayed_reaction(bot, sent_resp.chat.id, sent_resp.message_id))
+            asyncio.create_task(send_sequential_food_emoji(message.chat.id))
         return
 
     if is_url(text):
@@ -369,10 +467,9 @@ async def handle_message(message: types.Message):
         if queue.full():
             sent_q = await message.reply(STriNGs.QUEUE_FULL_MESSAGE)
             asyncio.create_task(trigger_delayed_reaction(bot, sent_q.chat.id, sent_q.message_id))
+            asyncio.create_task(send_sequential_food_emoji(message.chat.id))
             return
-            
         await queue.put((message, text))
-        
         if user_id not in user_workers or user_workers[user_id].done():
             user_workers[user_id] = asyncio.create_task(user_queue_worker(user_id))
         return
@@ -380,24 +477,25 @@ async def handle_message(message: types.Message):
     has_english = bool(re.search(r'[a-zA-Z]', text))
     has_russian = bool(re.search(r'[а-яА-Я]', text))
     
-    if has_english or has_russian:
+    if (has_english or has_russian) and not (validate_custom_username(text) and not text.startswith("@")):
         processed_text = process_custom_languages(text)
         sent_custom = await message.reply(processed_text)
         asyncio.create_task(trigger_delayed_reaction(bot, sent_custom.chat.id, sent_custom.message_id))
+        asyncio.create_task(send_sequential_food_emoji(message.chat.id))
         return
 
     if chat_type in [ChatType.GROUP, ChatType.SUPERGROUP, ChatType.CHANNEL]:
         if text == "بوت":
-            current_index = await DATAbase.get_user_step(user_id)
+            current_index = await dATAbAse.get_user_step(user_id)
             handler_func = STriNGs.RESPONSE_HANDLERS[current_index]
             next_index = (current_index + 1) % len(STriNGs.RESPONSE_HANDLERS)
-            await DATAbase.update_user_step(user_id, next_index)
+            await dATAbAse.update_user_step(user_id, next_index)
             await handler_func(message, animate_text)
     else:
-        current_index = await DATAbase.get_user_step(user_id)
+        current_index = await dATAbAse.get_user_step(user_id)
         handler_func = STriNGs.RESPONSE_HANDLERS[current_index]
         next_index = (current_index + 1) % len(STriNGs.RESPONSE_HANDLERS)
-        await DATAbase.update_user_step(user_id, next_index)
+        await dATAbAse.update_user_step(user_id, next_index)
         await handler_func(message, animate_text)
 
 async def on_startup():
@@ -405,15 +503,18 @@ async def on_startup():
         try:
             sent_start = await bot.send_message(chat_id=admin_id, text=STriNGs.STARTUP_MESSAGE)
             asyncio.create_task(trigger_delayed_reaction(bot, sent_start.chat.id, sent_start.message_id))
+            asyncio.create_task(send_sequential_food_emoji(int(admin_id)))
         except Exception:
             pass
 
+
 async def main():
-    await DATAbase.init_db()
+    await dATAbAse.init_db()
     if not os.path.exists('downloads'):
         os.makedirs('downloads')
     await on_startup()
     await dp.start_polling(bot)
+    
 
 if __name__ == "__main__":
     asyncio.run(main())
