@@ -186,7 +186,7 @@ async def process_download_task(message: types.Message, url_text: str):
                     )
 
     ydl_opts = {
-        'format': 'best',
+        'format': 'bestvideo+bestaudio/best',
         'progress_hooks': [ytdl_hook],
         'quiet': True,
         'no_warnings': True,
@@ -209,7 +209,7 @@ async def process_download_task(message: types.Message, url_text: str):
         for entry in entries:
             custom_name = generate_smart_filename(uploader)
             entry_opts = {
-                'format': 'best',
+                'format': 'bestvideo+bestaudio/best',
                 'outtmpl': f'downloads/{custom_name}.%(ext)s',
                 'quiet': True,
                 'no_warnings': True

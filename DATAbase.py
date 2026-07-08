@@ -33,7 +33,7 @@ async def get_user_step(user_id: int) -> int:
 async def update_user_step(user_id: int, new_step: int):
     global pool
     async with pool.acquire() as conn:
-        await conn.execute("UPDATE users SET step_counter = $1 WHERE user_id = $2", new_step, new_step_id)
+        await conn.execute("UPDATE users SET step_counter = $1 WHERE user_id = $2", new_step, user_id)
 
 async def get_cached_file_ids(url: str):
     global pool
