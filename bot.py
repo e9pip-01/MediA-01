@@ -144,7 +144,7 @@ async def handle_response_1(message: types.Message):
     await animate_text(message, text, reply_markup=buttons)
 
 async def handle_response_2(message: types.Message):
-    text = "مو ناوي تدلعني مثل البوتات\nترى ازعل منك اصيح المولاي يغصص بلاعيمك"
+    text = "مو ناوي تدلعني مثل البوتات ترى ازعل منك اصيح المولاي\nيغصص بلاعيمك"
     buttons = get_buttons()
     await animate_text(message, text, reply_markup=buttons)
 
