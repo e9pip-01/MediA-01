@@ -6,24 +6,17 @@ import random
 import string
 import json
 from collections import defaultdict
-import asyncpg
+import aiosqlite
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 from yt_dlp import YoutubeDL
 
 TOKEN = os.getenv("BOT_TOKEN")
-DATABASE_URL = os.getenv("DATABASE_URL")
+DB_PATH = "bot_database.db"
 
 DEVELOPER_ID = "8597653867"
 SUPPORT_ID = "8467593882"
-
-TEXT_1 = "اهلين وياك بوت ميديا تريد فيديو لو صورة دز\nرابطهن وتدلل"
-TEXT_2 = "مو ناوي تدلعني مثل البوتات\nترى ازعل منك اصيح المولاي يغصص بلاعيمك"
-TEXT_3 = "من اشوف زبك يسعبل كسي وتذوب الروح انزل\nلعيرك ذليلة امصة ولباسي مشلوح"
-TEXT_4 = "انزع لباسي الك وتنيكني يبعد كل طموح شكني\nبعيرك وضرطني العافيه ترى فدوة الك اروح"
-
-RESPONSES = [TEXT_1, TEXT_2, TEXT_3, TEXT_4]
 
 PROGRESS_START = "انتظر لأتمعن النظر على الرابط وتفقده\nسيتم ارسال الميديا"
 PROGRESS_TEMPLATE = "انتظر لأتمعن النظر على الرابط وتفقده\nسيتم ارسال الميديا {percent}%"
@@ -39,105 +32,8 @@ BTN_SUPPORT = "ابلاغ الدعم"
 
 EMOJIS = ["🍕", "🌭", "🥪", "🥞", "🍣", "🍔"]
 
-pool = None
-
-async def init_db():
-    global pool
-    pool = await asyncpg.create_pool(dsn=DATABASE_URL)
-    async with pool.acquire() as conn:
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                user_id BIGINT PRIMARY KEY,
-                step_counter INT DEFAULT 0
-            );
-            CREATE TABLE IF NOT EXISTS url_cache (
-                url TEXT PRIMARY KEY,
-                file_ids TEXT
-            );
-        """)
-
-async def get_user_step(user_id: int) -> int:
-    global pool
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT step_counter FROM users WHERE user_id = $1", user_id)
-        if row is None:
-            await conn.execute("INSERT INTO users (user_id, step_counter) VALUES ($1, 0)", user_id)
-            return 0
-        return row['step_counter']
-
-async def update_user_step(user_id: int, new_step: int):
-    global pool
-    async with pool.acquire() as conn:
-        await conn.execute("UPDATE users SET step_counter = $1 WHERE user_id = $2", new_step, user_id)
-
-async def get_cached_file_ids(url: str):
-    global pool
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT file_ids FROM url_cache WHERE url = $1", url)
-        if row and row['file_ids']:
-            return json.loads(row['file_ids'])
-        return None
-
-async def save_cached_file_ids(url: str, file_ids: list):
-    global pool
-    async with pool.acquire() as conn:
-        json_data = json.dumps(file_ids)
-        await conn.execute(
-            "INSERT INTO url_cache (url, file_ids) VALUES ($1, $2) ON CONFLICT (url) DO UPDATE SET file_ids = $2",
-            url, json_data
-        )
-
-bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-dp = Dispatcher()
-
-user_queues = defaultdict(lambda: asyncio.Queue(maxsize=6))
-user_workers = {}
-
-def cleanup_stale_files():
-    downloads_dir = 'downloads'
-    if not os.path.exists(downloads_dir):
-        return
-    now = time.time()
-    for filename in os.listdir(downloads_dir):
-        file_path = os.path.join(downloads_dir, filename)
-        if os.path.isfile(file_path):
-            if now - os.path.getmtime(file_path) > 3600:
-                try:
-                    os.remove(file_path)
-                except Exception:
-                    pass
-
 def get_random_emoji_msg() -> str:
     return f"\n\n{random.choice(EMOJIS)}"
-
-def clean_filename_part(text: str) -> str:
-    if not text:
-        return ""
-    
-    cleaned = re.sub(r'[^a-zA-Zа-яА-Я0-9\s\-&]', '', text)
-    cleaned = ' '.join(cleaned.split())
-    
-    result = []
-    for char in cleaned:
-        if char.isalpha():
-            if char in 'ftanmjutFTANMJUT':
-                result.append(char.upper())
-            elif char in 'абиАБИ':
-                result.append(char.upper())
-            else:
-                result.append(char.lower())
-        else:
-            result.append(char)
-            
-    return "".join(result).strip()
-
-def generate_smart_filename(uploader: str) -> str:
-    clean_uploader = clean_filename_part(uploader)
-    if not clean_uploader:
-        clean_uploader = "ANoNyMoUs"
-        
-    random_digits = "".join(random.choices(string.digits, k=9))
-    return f"{clean_uploader} - {random_digits}"
 
 def get_buttons():
     kb = [
@@ -204,6 +100,136 @@ async def animate_text(message: types.Message, text: str):
     except Exception:
         pass
 
+
+async def handle_response_1(message: types.Message, text: str):
+    await animate_text(message, text)
+
+async def handle_response_2(message: types.Message, text: str):
+    await animate_text(message, text)
+
+async def handle_response_3(message: types.Message, text: str):
+    await animate_text(message, text)
+
+async def handle_response_4(message: types.Message, text: str):
+    await animate_text(message, text)
+
+
+RESPONSE_HANDLERS = [
+    {
+        "text": "اهلين وياك بوت ميديا تريد فيديو لو صورة دز\nرابطهن وتدلل",
+        "handler": handle_response_1
+    },
+    {
+        "text": "مو ناوي تدلعني مثل البوتات\nترى ازعل منك اصيح المولاي يغصص بلاعيمك",
+        "handler": handle_response_2
+    },
+    {
+        "text": "من اشوف زبك يسعبل كسي وتذوب الروح انزل\nلعيرك ذليلة امصة ولباسي مشلوح",
+        "handler": handle_response_3
+    },
+    {
+        "text": "انزع لباسي الك وتنيكني يبعد كل طموح شكني\nبعيرك وضرطني العافيه ترى فدوة الك اروح",
+        "handler": handle_response_4
+    }
+]
+
+async def init_db():
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY,
+                step_counter INTEGER DEFAULT 0
+            );
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS url_cache (
+                url TEXT PRIMARY KEY,
+                file_ids TEXT
+            );
+        """)
+        await db.commit()
+
+async def get_user_step(user_id: int) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT step_counter FROM users WHERE user_id = ?", (user_id,)) as cursor:
+            row = await cursor.fetchone()
+            if row is None:
+                await db.execute("INSERT INTO users (user_id, step_counter) VALUES (?, 0)", (user_id,))
+                await db.commit()
+                return 0
+            return row[0]
+
+async def update_user_step(user_id: int, new_step: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE users SET step_counter = ? WHERE user_id = ?", (new_step, user_id))
+        await db.commit()
+
+async def get_cached_file_ids(url: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT file_ids FROM url_cache WHERE url = ?", (url,)) as cursor:
+            row = await cursor.fetchone()
+            if row and row[0]:
+                return json.loads(row[0])
+            return None
+
+async def save_cached_file_ids(url: str, file_ids: list):
+    async with aiosqlite.connect(DB_PATH) as db:
+        json_data = json.dumps(file_ids)
+        await db.execute(
+            "INSERT INTO url_cache (url, file_ids) VALUES (?, ?) ON CONFLICT(url) DO UPDATE SET file_ids = ?",
+            (url, json_data, json_data)
+        )
+        await db.commit()
+
+bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+dp = Dispatcher()
+
+user_queues = defaultdict(lambda: asyncio.Queue(maxsize=6))
+user_workers = {}
+
+def cleanup_stale_files():
+    downloads_dir = 'downloads'
+    if not os.path.exists(downloads_dir):
+        return
+    now = time.time()
+    for filename in os.listdir(downloads_dir):
+        file_path = os.path.join(downloads_dir, filename)
+        if os.path.isfile(file_path):
+            if now - os.path.getmtime(file_path) > 3600:
+                try:
+                    os.remove(file_path)
+                except Exception:
+                    pass
+
+def clean_filename_part(text: str) -> str:
+    if not text:
+        return ""
+    
+    cleaned = re.sub(r'[^a-zA-Zа-яА-Я0-9\s\-&]', '', text)
+    cleaned = ' '.join(cleaned.split())
+    
+    result = []
+    for char in cleaned:
+        if char.isalpha():
+            if char in 'ftanmjutFTANMJUT':
+                result.append(char.upper())
+            elif char in 'абиАБИ':
+                result.append(char.upper())
+            else:
+                result.append(char.lower())
+        else:
+            result.append(char)
+            
+    return "".join(result).strip()
+
+def generate_smart_filename(uploader: str) -> str:
+    clean_uploader = clean_filename_part(uploader)
+    if not clean_uploader:
+        clean_uploader = "ANoNyMoUs"
+        
+    random_digits = "".join(random.choices(string.digits, k=9))
+    return f"{clean_uploader} - {random_digits}"
+
 def is_url(text: str) -> bool:
     if re.search(r'(t\.me|youtube\.com|youtu\.be)', text, re.IGNORECASE):
         return False
@@ -256,7 +282,7 @@ async def process_download_task(message: types.Message, url_text: str):
                     )
 
     ydl_opts = {
-        'format': 'bestvideo+bestaudio/best',
+        'format': 'best',
         'progress_hooks': [ytdl_hook],
         'quiet': True,
         'no_warnings': True,
@@ -279,7 +305,7 @@ async def process_download_task(message: types.Message, url_text: str):
         for entry in entries:
             custom_name = generate_smart_filename(uploader)
             entry_opts = {
-                'format': 'bestvideo+bestaudio/best',
+                'format': 'best',
                 'outtmpl': f'downloads/{custom_name}.%(ext)s',
                 'quiet': True,
                 'no_warnings': True
@@ -371,12 +397,15 @@ async def handle_message(message: types.Message):
             user_workers[user_id] = asyncio.create_task(user_queue_worker(user_id))
     else:
         current_index = await get_user_step(user_id)
-        response_text = RESPONSES[current_index]
         
-        next_index = (current_index + 1) % len(RESPONSES)
+        item = RESPONSE_HANDLERS[current_index]
+        response_text = item["text"]
+        handler_func = item["handler"]
+        
+        next_index = (current_index + 1) % len(RESPONSE_HANDLERS)
         await update_user_step(user_id, next_index)
         
-        await animate_text(message, response_text)
+        await handler_func(message, response_text)
 
 async def on_startup():
     for admin_id in [DEVELOPER_ID, SUPPORT_ID]:
