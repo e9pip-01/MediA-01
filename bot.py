@@ -11,7 +11,7 @@ from aiogram.client.default import DefaultBotProperties
 from yt_dlp import YoutubeDL
 
 import STriNGs
-import DATAbAse
+import DATAbase
 
 TOKEN = os.getenv("BOT_TOKEN")
 
