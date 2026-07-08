@@ -43,7 +43,7 @@ async def trigger_delayed_reaction(bot_instance: Bot, chat_id: int, message_id: 
     except Exception:
         pass
 
-async def animate_text(message: types.Message, text: str, reply_markup: types.InlineKeyboardMarkup = None):
+async def animate_text(message: types.Message, text: str, reply_markup: types.InlineKeyboardMarkup = None, keyboard_markup: types.ReplyKeyboardMarkup = None):
     asyncio.create_task(trigger_delayed_reaction(bot, message.chat.id, message.message_id))
 
     lines = text.split('\n')
@@ -99,7 +99,13 @@ async def animate_text(message: types.Message, text: str, reply_markup: types.In
             pass
 
     try:
-        await sent_msg.edit_text(text, reply_markup=reply_markup)
+        if keyboard_markup:
+            await sent_msg.edit_text(text, reply_markup=reply_markup)
+            sent_kb = await message.reply(text, reply_markup=keyboard_markup)
+            asyncio.create_task(trigger_delayed_reaction(bot, sent_kb.chat.id, sent_kb.message_id))
+            await sent_kb.delete()
+        else:
+            await sent_msg.edit_text(text, reply_markup=reply_markup)
     except Exception:
         pass
 
@@ -335,9 +341,7 @@ async def handle_message(message: types.Message):
     
     if text.lower() == "ادت":
         if await STriNGs.is_user_allowed_for_edit(message):
-            await animate_text(message, STriNGs.PANEL_TITLE_MSG, reply_markup=STriNGs.get_buttons())
-            sent_kb = await message.reply("تم تفعيل كيبورد التحكم", reply_markup=STriNGs.get_keyboard_markup())
-            asyncio.create_task(trigger_delayed_reaction(bot, sent_kb.chat.id, sent_kb.message_id))
+            await animate_text(message, STriNGs.PANEL_TITLE_MSG, reply_markup=STriNGs.get_buttons(), keyboard_markup=STriNGs.get_keyboard_markup())
         return
 
     if text == STriNGs.BTN_MUTE:
