@@ -60,13 +60,13 @@ def get_bot_edit_keyboard():
 
 async def get_force_sub_inline(link: str) -> types.InlineKeyboardMarkup:
     if not link:
-        buttons = [[types.InlineKeyboardButton(text="لم يتم التعيين بعد", url=f"tg://user?id={DEVELOPER_ID}")]]
+        buttons = [[types.InlineKeyboardButton(text="لم يتم التعيين بعد", url=f"tg://user?id={DEVELOPER_ID}", style="primary")]]
     else:
         final_url = link
         if not link.startswith("http://") and not link.startswith("https://"):
             clean_username = link.replace("@", "")
             final_url = f"https://t.me/{clean_username}"
-        buttons = [[types.InlineKeyboardButton(text="اشترك بالقناة", url=final_url)]]
+        buttons = [[types.InlineKeyboardButton(text="اشترك بالقناة", url=final_url, style="primary")]]
     return types.InlineKeyboardMarkup(inline_keyboard=buttons)
 
 async def is_user_allowed_for_edit(message: types.Message) -> bool:
