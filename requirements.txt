@@ -1,5 +1,4 @@
 aiogram
 yt-dlp
-ujson
 aiohttp
-asyncpg
+aiosqlite

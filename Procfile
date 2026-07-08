@@ -1,1 +1,1 @@
-worker: python MediA.py
+worker: python bot.py
