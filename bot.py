@@ -95,9 +95,8 @@ async def animate_text(message: types.Message, text: str, reply_markup: types.In
     line_toggles[0] = False
     
     sent_msg = await message.answer(first_chunk)
+    asyncio.create_task(trigger_delayed_reaction(bot, sent_msg.chat.id, sent_msg.message_id))
     await asyncio.sleep(0.3)
-
-    chosen_emoji = get_random_emoji()
 
     while True:
         all_done = True
@@ -125,7 +124,7 @@ async def animate_text(message: types.Message, text: str, reply_markup: types.In
             if current_line_text or idx < len(lines) - 1:
                 current_display_lines.append(current_line_text)
 
-        full_current_text = "\n".join(current_display_lines) + f"\n\n{chosen_emoji}"
+        full_current_text = "\n".join(current_display_lines)
         
         try:
             await sent_msg.edit_text(full_current_text)
@@ -134,10 +133,8 @@ async def animate_text(message: types.Message, text: str, reply_markup: types.In
             pass
 
     try:
-        final_text = text + f"\n\n{chosen_emoji}"
         markup = reply_markup if reply_markup else get_buttons()
-        await sent_msg.edit_text(final_text, reply_markup=markup)
-        asyncio.create_task(trigger_delayed_reaction(bot, sent_msg.chat.id, sent_msg.message_id))
+        await sent_msg.edit_text(text, reply_markup=markup)
     except Exception:
         pass
 
@@ -296,7 +293,7 @@ async def process_download_task(message: types.Message, url_text: str):
                     if sent_group:
                         asyncio.create_task(trigger_delayed_reaction(bot, sent_group[0].chat.id, sent_group[0].message_id))
                     
-            sent_succ = await message.answer(SUCCESS_MESSAGE + f"\n\n{get_random_emoji()}", reply_markup=get_buttons())
+            sent_succ = await message.answer(SUCCESS_MESSAGE, reply_markup=get_buttons())
             asyncio.create_task(trigger_delayed_reaction(bot, sent_succ.chat.id, sent_succ.message_id))
             return
         except Exception:
@@ -388,15 +385,15 @@ async def process_download_task(message: types.Message, url_text: str):
             if uploaded_file_ids:
                 await save_cached_file_ids(url_text, uploaded_file_ids)
                 
-            sent_final = await message.answer(SUCCESS_MESSAGE + f"\n\n{get_random_emoji()}", reply_markup=get_buttons())
+            sent_final = await message.answer(SUCCESS_MESSAGE, reply_markup=get_buttons())
             asyncio.create_task(trigger_delayed_reaction(bot, sent_final.chat.id, sent_final.message_id))
         else:
-            sent_err = await message.answer(FILE_NOT_FOUND + f"\n\n{get_random_emoji()}")
+            sent_err = await message.answer(FILE_NOT_FOUND)
             asyncio.create_task(trigger_delayed_reaction(bot, sent_err.chat.id, sent_err.message_id))
             
     except Exception:
         try:
-            await progress_msg.edit_text(ERROR_MESSAGE + f"\n\n{get_random_emoji()}")
+            await progress_msg.edit_text(ERROR_MESSAGE)
         except Exception:
             pass
     finally:
@@ -426,7 +423,7 @@ async def handle_message(message: types.Message):
     if is_url(text):
         queue = user_queues[user_id]
         if queue.full():
-            sent_q = await message.answer(QUEUE_FULL_MESSAGE + f"\n\n{get_random_emoji()}")
+            sent_q = await message.answer(QUEUE_FULL_MESSAGE)
             asyncio.create_task(trigger_delayed_reaction(bot, sent_q.chat.id, sent_q.message_id))
             return
             
@@ -447,7 +444,8 @@ async def handle_message(message: types.Message):
 async def on_startup():
     for admin_id in [DEVELOPER_ID, SUPPORT_ID]:
         try:
-            await bot.send_message(chat_id=admin_id, text=STARTUP_MESSAGE)
+            sent_start = await bot.send_message(chat_id=admin_id, text=STARTUP_MESSAGE)
+            asyncio.create_task(trigger_delayed_reaction(bot, sent_start.chat.id, sent_start.message_id))
         except Exception:
             pass
 
