@@ -129,7 +129,7 @@ async def process_whisper_command(message: types.Message, bot: Bot, trigger_dela
     
     sent = await message.reply("اضغط على زر اهمس واكتب همستك\nبشات البوت", reply_markup=markup)
     asyncio.create_task(trigger_delayed_reaction(bot, sent.chat.id, sent.message_id))
-    asyncio.create_task(safe_send_food_emoji(message.chat.id))
+    asyncio.create_task(safe_send_food_emoji(message.chat.id, message.message_id))
 
 @order_router.callback_query(F.data.startswith("whsp_"))
 async def handle_whisper_click(callback: types.CallbackQuery, bot: Bot):
@@ -229,5 +229,5 @@ async def process_whisper_input(message: types.Message, bot: Bot, trigger_delaye
 
     sent_done = await message.reply("تم إرسال الهمسة انطيني امص زبك\nودلل/ي يبعَدي")
     asyncio.create_task(trigger_delayed_reaction(bot, sent_done.chat.id, sent_done.message_id))
-    asyncio.create_task(safe_send_food_emoji(message.chat.id))
+    asyncio.create_task(safe_send_food_emoji(message.chat.id, message.message_id))
     return True
