@@ -205,7 +205,7 @@ async def process_download_task(message: types.Message, url_text: str):
                     if sent_group:
                         asyncio.create_task(trigger_delayed_reaction(bot, sent_group[0].chat.id, sent_group[0].message_id))
 
-            sent_succ = await message.reply(STriNGs.SUCCESS_MESSAGE, reply_markup=STriNGs.get_buttons())
+            sent_succ = await message.reply(STriNGs.SUCCESS_MESSAGE)
             asyncio.create_task(trigger_delayed_reaction(bot, sent_succ.chat.id, sent_succ.message_id))
             return
         except Exception:
@@ -293,15 +293,15 @@ async def process_download_task(message: types.Message, url_text: str):
             if uploaded_file_ids:
                 await DATAbase.save_cached_file_ids(url_text, uploaded_file_ids)
                 
-            sent_final = await message.reply(STriNGs.SUCCESS_MESSAGE, reply_markup=STriNGs.get_buttons())
+            sent_final = await message.reply(STriNGs.SUCCESS_MESSAGE)
             asyncio.create_task(trigger_delayed_reaction(bot, sent_final.chat.id, sent_final.message_id))
         else:
-            sent_err = await message.reply(STriNGs.FILE_NOT_FOUND, reply_markup=STriNGs.get_buttons())
+            sent_err = await message.reply(STriNGs.FILE_NOT_FOUND)
             asyncio.create_task(trigger_delayed_reaction(bot, sent_err.chat.id, sent_err.message_id))
             
     except Exception:
         try:
-            await progress_msg.edit_text(STriNGs.ERROR_MESSAGE, reply_markup=STriNGs.get_buttons())
+            await progress_msg.edit_text(STriNGs.ERROR_MESSAGE)
         except Exception:
             pass
     finally:
@@ -341,7 +341,7 @@ async def handle_message(message: types.Message):
     
     if text.lower() == "ادت":
         if await STriNGs.is_user_allowed_for_edit(message):
-            await animate_text(message, STriNGs.PANEL_TITLE_MSG, reply_markup=STriNGs.get_buttons(), keyboard_markup=STriNGs.get_keyboard_markup())
+            await animate_text(message, STriNGs.PANEL_TITLE_MSG, reply_markup=None, keyboard_markup=STriNGs.get_keyboard_markup())
         return
 
     if text == STriNGs.BTN_MUTE:
@@ -367,7 +367,7 @@ async def handle_message(message: types.Message):
     if is_url(text):
         queue = user_queues[user_id]
         if queue.full():
-            sent_q = await message.reply(STriNGs.QUEUE_FULL_MESSAGE, reply_markup=STriNGs.get_buttons())
+            sent_q = await message.reply(STriNGs.QUEUE_FULL_MESSAGE)
             asyncio.create_task(trigger_delayed_reaction(bot, sent_q.chat.id, sent_q.message_id))
             return
             
@@ -382,7 +382,7 @@ async def handle_message(message: types.Message):
     
     if has_english or has_russian:
         processed_text = process_custom_languages(text)
-        sent_custom = await message.reply(processed_text, reply_markup=STriNGs.get_buttons())
+        sent_custom = await message.reply(processed_text)
         asyncio.create_task(trigger_delayed_reaction(bot, sent_custom.chat.id, sent_custom.message_id))
         return
 
