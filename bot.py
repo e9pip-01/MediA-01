@@ -5,7 +5,7 @@ import time
 import random
 import string
 import json
-from collections import defaultdict
+from collections import defaultdict, deque
 import aiosqlite
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.enums import ParseMode
@@ -18,6 +18,14 @@ DB_PATH = "bot_database.db"
 DEVELOPER_ID = "8597653867"
 SUPPORT_ID = "8467593882"
 
+DEFAULT_SUBSCRIBE_LINK = "tg://user?id=8597653867"
+DEFAULT_BUTTON_TEXT = "تواصل مع المطور"
+DEFAULT_BUTTON_STYLE = "primary"
+
+SUPPORT_LINK = "tg://user?id=8467593882"
+BTN_SUPPORT = "ابلاغ الدعم"
+SUPPORT_BUTTON_STYLE = "destructive"
+
 PROGRESS_START = "انتظر لأتمعن النظر على الرابط وتفقده\nسيتم ارسال الميديا"
 PROGRESS_TEMPLATE = "انتظر لأتمعن النظر على الرابط وتفقده\nسيتم ارسال الميديا {percent}%"
 ERROR_MESSAGE = "الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي"
@@ -27,22 +35,51 @@ SUCCESS_MESSAGE = "يدلل بعد كسي\nترى اموت بيك اعشقك ه�
 STARTUP_MESSAGE = "اشتغل البوت مرتلخ تاج راسي\nارضع عيرك ؟!"
 QUEUE_FULL_MESSAGE = "سته عمليات داشتغل عليهم وبعدك تريد\nلعد شكد ملعوب بعرضك"
 
-BTN_DEV = "تواصل مع المطور"
-BTN_SUPPORT = "ابلاغ الدعم"
-
 EMOJIS = ["🍕", "🌭", "🥪", "🥞", "🍣", "🍔"]
+REACTION_EMOJIS = ["🥰", "😡", "😭", "🍓", "😘", "🤣", "🤗"]
+REACTION_DELAYS = [3.6, 4.2, 4.8, 6.3, 2.4]
 
-def get_random_emoji_msg() -> str:
-    return f"\n\n{random.choice(EMOJIS)}"
+recent_reactions = deque(maxlen=4)
+recent_delays = deque(maxlen=4)
+
+def get_random_emoji() -> str:
+    return random.choice(EMOJIS)
+
+def get_unique_reaction() -> str:
+    available = [e for e in REACTION_EMOJIS if e not in recent_reactions]
+    chosen = random.choice(available if available else REACTION_EMOJIS)
+    recent_reactions.append(chosen)
+    return chosen
+
+def get_unique_delay() -> float:
+    available = [d for d in REACTION_DELAYS if d not in recent_delays]
+    chosen = random.choice(available if available else REACTION_DELAYS)
+    recent_delays.append(chosen)
+    return chosen
+
+async def trigger_delayed_reaction(bot_instance: Bot, chat_id: int, message_id: int):
+    try:
+        delay = get_unique_delay()
+        reaction_emoji = get_unique_reaction()
+        await asyncio.sleep(delay)
+        await bot_instance.set_message_reaction(
+            chat_id=chat_id,
+            message_id=message_id,
+            reaction=[types.ReactionTypeEmoji(emoji=reaction_emoji)]
+        )
+    except Exception:
+        pass
 
 def get_buttons():
     kb = [
-        [types.InlineKeyboardButton(text=BTN_DEV, url=f"tg://user?id={DEVELOPER_ID}", style="primary")],
-        [types.InlineKeyboardButton(text=BTN_SUPPORT, url=f"tg://user?id={SUPPORT_ID}", style="destructive")]
+        [types.InlineKeyboardButton(text=DEFAULT_BUTTON_TEXT, url=DEFAULT_SUBSCRIBE_LINK, style=DEFAULT_BUTTON_STYLE)],
+        [types.InlineKeyboardButton(text=BTN_SUPPORT, url=SUPPORT_LINK, style=SUPPORT_BUTTON_STYLE)]
     ]
     return types.InlineKeyboardMarkup(inline_keyboard=kb)
 
-async def animate_text(message: types.Message, text: str):
+async def animate_text(message: types.Message, text: str, reply_markup: types.InlineKeyboardMarkup = None):
+    asyncio.create_task(trigger_delayed_reaction(bot, message.chat.id, message.message_id))
+
     lines = text.split('\n')
     parsed_lines = [line.split() for line in lines]
     
@@ -59,6 +96,8 @@ async def animate_text(message: types.Message, text: str):
     
     sent_msg = await message.answer(first_chunk)
     await asyncio.sleep(0.3)
+
+    chosen_emoji = get_random_emoji()
 
     while True:
         all_done = True
@@ -86,7 +125,7 @@ async def animate_text(message: types.Message, text: str):
             if current_line_text or idx < len(lines) - 1:
                 current_display_lines.append(current_line_text)
 
-        full_current_text = "\n".join(current_display_lines)
+        full_current_text = "\n".join(current_display_lines) + f"\n\n{chosen_emoji}"
         
         try:
             await sent_msg.edit_text(full_current_text)
@@ -95,42 +134,38 @@ async def animate_text(message: types.Message, text: str):
             pass
 
     try:
-        final_text = text + get_random_emoji_msg()
-        await sent_msg.edit_text(final_text, reply_markup=get_buttons())
+        final_text = text + f"\n\n{chosen_emoji}"
+        markup = reply_markup if reply_markup else get_buttons()
+        await sent_msg.edit_text(final_text, reply_markup=markup)
+        asyncio.create_task(trigger_delayed_reaction(bot, sent_msg.chat.id, sent_msg.message_id))
     except Exception:
         pass
 
+async def handle_response_1(message: types.Message):
+    text = "اهلين وياك بوت ميديا تريد فيديو لو صورة دز\nرابطهن وتدلل"
+    buttons = get_buttons()
+    await animate_text(message, text, reply_markup=buttons)
 
-async def handle_response_1(message: types.Message, text: str):
-    await animate_text(message, text)
+async def handle_response_2(message: types.Message):
+    text = "مو ناوي تدلعني مثل البوتات\nترى ازعل منك اصيح المولاي يغصص بلاعيمك"
+    buttons = get_buttons()
+    await animate_text(message, text, reply_markup=buttons)
 
-async def handle_response_2(message: types.Message, text: str):
-    await animate_text(message, text)
+async def handle_response_3(message: types.Message):
+    text = "من اشوف زبك يسعبل كسي وتذوب الروح انزل\nالعيرك ذليلة امصة ولباسي مشلوح"
+    buttons = get_buttons()
+    await animate_text(message, text, reply_markup=buttons)
 
-async def handle_response_3(message: types.Message, text: str):
-    await animate_text(message, text)
-
-async def handle_response_4(message: types.Message, text: str):
-    await animate_text(message, text)
-
+async def handle_response_4(message: types.Message):
+    text = "انزع لباسي الك وتنيكني يبعد كل طموح شكني\nبعيرك وضرطني العافيه ترى فدوة الك اروح"
+    buttons = get_buttons()
+    await animate_text(message, text, reply_markup=buttons)
 
 RESPONSE_HANDLERS = [
-    {
-        "text": "اهلين وياك بوت ميديا تريد فيديو لو صورة دز\nرابطهن وتدلل",
-        "handler": handle_response_1
-    },
-    {
-        "text": "مو ناوي تدلعني مثل البوتات\nترى ازعل منك اصيح المولاي يغصص بلاعيمك",
-        "handler": handle_response_2
-    },
-    {
-        "text": "من اشوف زبك يسعبل كسي وتذوب الروح انزل\nلعيرك ذليلة امصة ولباسي مشلوح",
-        "handler": handle_response_3
-    },
-    {
-        "text": "انزع لباسي الك وتنيكني يبعد كل طموح شكني\nبعيرك وضرطني العافيه ترى فدوة الك اروح",
-        "handler": handle_response_4
-    }
+    handle_response_1,
+    handle_response_2,
+    handle_response_3,
+    handle_response_4
 ]
 
 async def init_db():
@@ -237,6 +272,7 @@ def is_url(text: str) -> bool:
     return bool(re.match(regex, text))
 
 async def process_download_task(message: types.Message, url_text: str):
+    asyncio.create_task(trigger_delayed_reaction(bot, message.chat.id, message.message_id))
     user_id = message.from_user.id
     
     cached_ids = await get_cached_file_ids(url_text)
@@ -247,26 +283,33 @@ async def process_download_task(message: types.Message, url_text: str):
                 media_group = []
                 for idx, fid in enumerate(chunk):
                     if idx == 0:
-                        caption_text = get_random_emoji_msg().strip()
+                        caption_text = get_random_emoji().strip()
                         media_group.append(types.InputMediaDocument(media=fid, caption=caption_text))
                     else:
                         media_group.append(types.InputMediaDocument(media=fid))
                 
                 if len(media_group) == 1:
-                    await message.answer_document(media_group[0].media, caption=media_group[0].caption)
+                    sent = await message.answer_document(media_group[0].media, caption=media_group[0].caption)
+                    asyncio.create_task(trigger_delayed_reaction(bot, sent.chat.id, sent.message_id))
                 else:
-                    await message.answer_media_group(media=media_group)
+                    sent_group = await message.answer_media_group(media=media_group)
+                    if sent_group:
+                        asyncio.create_task(trigger_delayed_reaction(bot, sent_group[0].chat.id, sent_group[0].message_id))
                     
-            await message.answer(SUCCESS_MESSAGE + get_random_emoji_msg(), reply_markup=get_buttons())
+            sent_succ = await message.answer(SUCCESS_MESSAGE + f"\n\n{get_random_emoji()}", reply_markup=get_buttons())
+            asyncio.create_task(trigger_delayed_reaction(bot, sent_succ.chat.id, sent_succ.message_id))
             return
         except Exception:
             pass
 
     cleanup_stale_files()
     progress_msg = await message.answer(PROGRESS_START)
+    asyncio.create_task(trigger_delayed_reaction(bot, progress_msg.chat.id, progress_msg.message_id))
     last_reported_progress = 0
     downloaded_files = []
     
+    loop = asyncio.get_running_loop()
+
     def ytdl_hook(d):
         nonlocal last_reported_progress
         if d['status'] == 'downloading':
@@ -278,7 +321,7 @@ async def process_download_task(message: types.Message, url_text: str):
                     last_reported_progress = (percent // 20) * 20
                     asyncio.run_coroutine_threadsafe(
                         progress_msg.edit_text(PROGRESS_TEMPLATE.format(percent=last_reported_progress)),
-                        asyncio.get_event_loop()
+                        loop
                     )
 
     ydl_opts = {
@@ -290,7 +333,6 @@ async def process_download_task(message: types.Message, url_text: str):
     }
     
     try:
-        loop = asyncio.get_event_loop()
         ydl = YoutubeDL(ydl_opts)
         info = await loop.run_in_executor(None, lambda: ydl.extract_info(url_text, download=False))
         
@@ -326,7 +368,7 @@ async def process_download_task(message: types.Message, url_text: str):
                 for idx, filepath in enumerate(chunk):
                     file_input = types.FSInputFile(filepath)
                     if idx == 0:
-                        caption_text = get_random_emoji_msg().strip()
+                        caption_text = get_random_emoji().strip()
                         media_group.append(types.InputMediaDocument(media=file_input, caption=caption_text))
                     else:
                         media_group.append(types.InputMediaDocument(media=file_input))
@@ -334,8 +376,11 @@ async def process_download_task(message: types.Message, url_text: str):
                 if len(media_group) == 1:
                     sent_doc = await message.answer_document(media_group[0].media, caption=media_group[0].caption)
                     uploaded_file_ids.append(sent_doc.document.file_id)
+                    asyncio.create_task(trigger_delayed_reaction(bot, sent_doc.chat.id, sent_doc.message_id))
                 else:
                     sent_group = await message.answer_media_group(media=media_group)
+                    if sent_group:
+                        asyncio.create_task(trigger_delayed_reaction(bot, sent_group[0].chat.id, sent_group[0].message_id))
                     for sent_msg in sent_group:
                         if sent_msg.document:
                             uploaded_file_ids.append(sent_msg.document.file_id)
@@ -343,13 +388,15 @@ async def process_download_task(message: types.Message, url_text: str):
             if uploaded_file_ids:
                 await save_cached_file_ids(url_text, uploaded_file_ids)
                 
-            await message.answer(SUCCESS_MESSAGE + get_random_emoji_msg(), reply_markup=get_buttons())
+            sent_final = await message.answer(SUCCESS_MESSAGE + f"\n\n{get_random_emoji()}", reply_markup=get_buttons())
+            asyncio.create_task(trigger_delayed_reaction(bot, sent_final.chat.id, sent_final.message_id))
         else:
-            await message.answer(FILE_NOT_FOUND + get_random_emoji_msg())
+            sent_err = await message.answer(FILE_NOT_FOUND + f"\n\n{get_random_emoji()}")
+            asyncio.create_task(trigger_delayed_reaction(bot, sent_err.chat.id, sent_err.message_id))
             
-    except Exception as e:
+    except Exception:
         try:
-            await progress_msg.edit_text(ERROR_MESSAGE + get_random_emoji_msg())
+            await progress_msg.edit_text(ERROR_MESSAGE + f"\n\n{get_random_emoji()}")
         except Exception:
             pass
     finally:
@@ -359,15 +406,6 @@ async def process_download_task(message: types.Message, url_text: str):
                     os.remove(filepath)
                 except Exception:
                     pass
-        
-        downloads_dir = 'downloads'
-        if os.path.exists(downloads_dir):
-            for filename in os.listdir(downloads_dir):
-                if filename.startswith(str(user_id)):
-                    try:
-                        os.remove(os.path.join(downloads_dir, filename))
-                    except Exception:
-                        pass
 
 async def user_queue_worker(user_id: int):
     queue = user_queues[user_id]
@@ -388,7 +426,8 @@ async def handle_message(message: types.Message):
     if is_url(text):
         queue = user_queues[user_id]
         if queue.full():
-            await message.answer(QUEUE_FULL_MESSAGE + get_random_emoji_msg())
+            sent_q = await message.answer(QUEUE_FULL_MESSAGE + f"\n\n{get_random_emoji()}")
+            asyncio.create_task(trigger_delayed_reaction(bot, sent_q.chat.id, sent_q.message_id))
             return
             
         await queue.put((message, text))
@@ -398,14 +437,12 @@ async def handle_message(message: types.Message):
     else:
         current_index = await get_user_step(user_id)
         
-        item = RESPONSE_HANDLERS[current_index]
-        response_text = item["text"]
-        handler_func = item["handler"]
+        handler_func = RESPONSE_HANDLERS[current_index]
         
         next_index = (current_index + 1) % len(RESPONSE_HANDLERS)
         await update_user_step(user_id, next_index)
         
-        await handler_func(message, response_text)
+        await handler_func(message)
 
 async def on_startup():
     for admin_id in [DEVELOPER_ID, SUPPORT_ID]:
