@@ -43,13 +43,6 @@ async def trigger_delayed_reaction(bot_instance: Bot, chat_id: int, message_id: 
     except Exception:
         pass
 
-async def send_followup_emoji(message: types.Message):
-    try:
-        emoji_msg = await message.answer(STriNGs.get_random_emoji().strip())
-        asyncio.create_task(trigger_delayed_reaction(bot, emoji_msg.chat.id, emoji_msg.message_id))
-    except Exception:
-        pass
-
 async def animate_text(message: types.Message, text: str, reply_markup: types.InlineKeyboardMarkup = None):
     asyncio.create_task(trigger_delayed_reaction(bot, message.chat.id, message.message_id))
 
@@ -67,7 +60,7 @@ async def animate_text(message: types.Message, text: str, reply_markup: types.In
     line_indices[0] = 3
     line_toggles[0] = False
     
-    sent_msg = await message.answer(first_chunk)
+    sent_msg = await message.reply(first_chunk)
     asyncio.create_task(trigger_delayed_reaction(bot, sent_msg.chat.id, sent_msg.message_id))
     await asyncio.sleep(0.3)
 
@@ -108,7 +101,6 @@ async def animate_text(message: types.Message, text: str, reply_markup: types.In
     try:
         markup = reply_markup if reply_markup else STriNGs.get_buttons()
         await sent_msg.edit_text(text, reply_markup=markup)
-        asyncio.create_task(send_followup_emoji(sent_msg))
     except Exception:
         pass
 
@@ -181,22 +173,21 @@ async def process_download_task(message: types.Message, url_text: str):
                     media_group.append(types.InputMediaDocument(media=fid))
                 
                 if len(media_group) == 1:
-                    sent = await message.answer_document(media_group[0].media)
+                    sent = await message.reply_document(media_group[0].media)
                     asyncio.create_task(trigger_delayed_reaction(bot, sent.chat.id, sent.message_id))
                 else:
-                    sent_group = await message.answer_media_group(media=media_group)
+                    sent_group = await message.reply_media_group(media=media_group)
                     if sent_group:
                         asyncio.create_task(trigger_delayed_reaction(bot, sent_group[0].chat.id, sent_group[0].message_id))
 
-            sent_succ = await message.answer(STriNGs.SUCCESS_MESSAGE, reply_markup=STriNGs.get_buttons())
+            sent_succ = await message.reply(STriNGs.SUCCESS_MESSAGE, reply_markup=STriNGs.get_buttons())
             asyncio.create_task(trigger_delayed_reaction(bot, sent_succ.chat.id, sent_succ.message_id))
-            asyncio.create_task(send_followup_emoji(sent_succ))
             return
         except Exception:
             pass
 
     cleanup_stale_files()
-    progress_msg = await message.answer(STriNGs.PROGRESS_START)
+    progress_msg = await message.reply(STriNGs.PROGRESS_START)
     asyncio.create_task(trigger_delayed_reaction(bot, progress_msg.chat.id, progress_msg.message_id))
     last_reported_progress = 0
     downloaded_files = []
@@ -263,11 +254,11 @@ async def process_download_task(message: types.Message, url_text: str):
                     media_group.append(types.InputMediaDocument(media=file_input))
                 
                 if len(media_group) == 1:
-                    sent_doc = await message.answer_document(media_group[0].media)
+                    sent_doc = await message.reply_document(media_group[0].media)
                     uploaded_file_ids.append(sent_doc.document.file_id)
                     asyncio.create_task(trigger_delayed_reaction(bot, sent_doc.chat.id, sent_doc.message_id))
                 else:
-                    sent_group = await message.answer_media_group(media=media_group)
+                    sent_group = await message.reply_media_group(media=media_group)
                     if sent_group:
                         asyncio.create_task(trigger_delayed_reaction(bot, sent_group[0].chat.id, sent_group[0].message_id))
                     for sent_msg in sent_group:
@@ -277,18 +268,15 @@ async def process_download_task(message: types.Message, url_text: str):
             if uploaded_file_ids:
                 await DATAbase.save_cached_file_ids(url_text, uploaded_file_ids)
                 
-            sent_final = await message.answer(STriNGs.SUCCESS_MESSAGE, reply_markup=STriNGs.get_buttons())
+            sent_final = await message.reply(STriNGs.SUCCESS_MESSAGE, reply_markup=STriNGs.get_buttons())
             asyncio.create_task(trigger_delayed_reaction(bot, sent_final.chat.id, sent_final.message_id))
-            asyncio.create_task(send_followup_emoji(sent_final))
         else:
-            sent_err = await message.answer(STriNGs.FILE_NOT_FOUND, reply_markup=STriNGs.get_buttons())
+            sent_err = await message.reply(STriNGs.FILE_NOT_FOUND, reply_markup=STriNGs.get_buttons())
             asyncio.create_task(trigger_delayed_reaction(bot, sent_err.chat.id, sent_err.message_id))
-            asyncio.create_task(send_followup_emoji(sent_err))
             
     except Exception:
         try:
             await progress_msg.edit_text(STriNGs.ERROR_MESSAGE, reply_markup=STriNGs.get_buttons())
-            asyncio.create_task(send_followup_emoji(progress_msg))
         except Exception:
             pass
     finally:
@@ -318,9 +306,8 @@ async def handle_message(message: types.Message):
     if is_url(text):
         queue = user_queues[user_id]
         if queue.full():
-            sent_q = await message.answer(STriNGs.QUEUE_FULL_MESSAGE, reply_markup=STriNGs.get_buttons())
+            sent_q = await message.reply(STriNGs.QUEUE_FULL_MESSAGE, reply_markup=STriNGs.get_buttons())
             asyncio.create_task(trigger_delayed_reaction(bot, sent_q.chat.id, sent_q.message_id))
-            asyncio.create_task(send_followup_emoji(sent_q))
             return
             
         await queue.put((message, text))
