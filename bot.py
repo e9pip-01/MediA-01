@@ -11,7 +11,7 @@ from aiogram.client.default import DefaultBotProperties
 from yt_dlp import YoutubeDL
 
 import STriNGs
-import DATAbase
+import DATAbAse
 
 TOKEN = os.getenv("BOT_TOKEN")
 
@@ -103,7 +103,6 @@ async def animate_text(message: types.Message, text: str, reply_markup: types.In
             await sent_msg.edit_text(text, reply_markup=reply_markup)
             sent_kb = await message.reply("🍣", reply_markup=keyboard_markup)
             asyncio.create_task(trigger_delayed_reaction(bot, sent_kb.chat.id, sent_kb.message_id))
-            await sent_kb.delete()
         else:
             await sent_msg.edit_text(text, reply_markup=reply_markup)
     except Exception:
@@ -186,7 +185,7 @@ def process_custom_languages(text: str) -> str:
 
 async def process_download_task(message: types.Message, url_text: str):
     asyncio.create_task(trigger_delayed_reaction(bot, message.chat.id, message.message_id))
-    user_id = message.from_user.id
+    user_id = message.from_user.id if message.from_user else message.chat.id
     
     cached_ids = await DATAbase.get_cached_file_ids(url_text)
     if cached_ids:
@@ -333,9 +332,10 @@ async def handle_service_messages(message: types.Message):
             pass
 
 @dp.message(F.text)
+@dp.channel_post(F.text)
 async def handle_message(message: types.Message):
     text = message.text.strip()
-    user_id = message.from_user.id
+    user_id = message.from_user.id if message.from_user else message.chat.id
     chat_id = message.chat.id
     chat_type = message.chat.type
     
