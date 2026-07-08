@@ -101,7 +101,7 @@ async def animate_text(message: types.Message, text: str, reply_markup: types.In
     try:
         if keyboard_markup:
             await sent_msg.edit_text(text, reply_markup=reply_markup)
-            sent_kb = await message.reply(text, reply_markup=keyboard_markup)
+            sent_kb = await message.reply("🍣", reply_markup=keyboard_markup)
             asyncio.create_task(trigger_delayed_reaction(bot, sent_kb.chat.id, sent_kb.message_id))
             await sent_kb.delete()
         else:
