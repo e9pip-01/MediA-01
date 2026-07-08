@@ -22,34 +22,39 @@ FOOD_EMOJIS = ["🥪", "🌭", "🥞", "🍔", "🍣", "🍕", "🍟"]
 
 BTN_MUTE = "قفل الاشعارات"
 BTN_UNMUTE = "فتح الاشعارات"
-BTN_CANCEL = "الغاء"
+BTN_CANCEL = "مسح"
 
 BTN_SET_LINK = "تعيين الرابط"
 BTN_SHOW_MSG = "عرض مسج الاشتراك"
 
-MUTE_SUCCESS_MSG = "¹# - تم قفل الاشعارات مولاي\nكل الاشعارات"
-UNMUTE_SUCCESS_MSG = "¹# - تم فتح الاشعارات مولاي\nكل الاشعارات"
+MUTE_SUCCESS_MSG = "¹# - تم قفل النقل مولاي\nيدلل تاج راسي"
+UNMUTE_SUCCESS_MSG = "¹# - تم فتح النقل مولاي\nيدلل تاج راسي"
 CANCEL_SUCCESS_MSG = "صار وتدلل\nمنو يكدر يعصيك يبعد كسي اه"
 PANEL_TITLE_MSG = "ازرار الاوامر كدامك عدل التريدا\nبكيفك يبعدي"
 
-BOT_EDIT_PANEL_MSG = "تريد تعرض مسج الاشتراك الفرضي دوس عرض\nهم لو تريد تعين رابط زر الاشتراك دوس تعيين الرابط"
+BOT_EDIT_PANEL_MSG = "تريد عرض مسج الاشتراك الفرضي دوس عرض\nهم لو تريد تعين رابط زر الاشتراك دوس تعيين الرابط"
 ASK_LINK_MSG = "ارسل يوزر / رابط القناة او الكروب\nيلا مولاي"
 INVALID_LINK_MSG = "اهو ليش تسوي هيج وياي ابوس زبك\nلاتعيدها مولاي"
 SET_LINK_SUCCESS_MSG = "تم تعيين زر الاشتراك الفرضي مثل ماردت\nسمعا وطاعة العيرك"
 
 FORCE_SUB_TEXT = "اشترك بالقناة لو ماراح يشتغل\nوياك البوت ضروري عيني"
 
-def get_keyboard_markup():
+def get_keyboard_markup(invoker_id: int):
     kb = [
-        [types.KeyboardButton(text=BTN_MUTE), types.KeyboardButton(text=BTN_UNMUTE)],
-        [types.KeyboardButton(text=BTN_CANCEL)]
+        [
+            types.InlineKeyboardButton(text=BTN_UNMUTE, switch_inline_query_current_chat="فتح الاشعارات"),
+            types.InlineKeyboardButton(text=BTN_MUTE, switch_inline_query_current_chat="قفل الاشعارات")
+        ],
+        [
+            types.InlineKeyboardButton(text=BTN_CANCEL, callback_data=f"btn_delete_{invoker_id}", style="primary")
+        ]
     ]
-    return types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, one_time_keyboard=True)
+    return types.InlineKeyboardMarkup(inline_keyboard=kb)
 
 def get_bot_edit_keyboard():
     kb = [
         [types.KeyboardButton(text=BTN_SET_LINK), types.KeyboardButton(text=BTN_SHOW_MSG)],
-        [types.KeyboardButton(text=BTN_CANCEL)]
+        [types.KeyboardButton(text="الغاء")]
     ]
     return types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, one_time_keyboard=True)
 
