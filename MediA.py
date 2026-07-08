@@ -4,21 +4,91 @@ import re
 import time
 import random
 import string
+import json
 from collections import defaultdict
+import asyncpg
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 from yt_dlp import YoutubeDL
-import STriNGs
-import DATAbase
 
 TOKEN = os.getenv("BOT_TOKEN")
-
-bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-dp = Dispatcher()
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 DEVELOPER_ID = "8597653867"
 SUPPORT_ID = "8467593882"
+
+TEXT_1 = "اهلين وياك بوت ميديا تريد فيديو لو صورة دز\nرابطهن وتدلل"
+TEXT_2 = "مو ناوي تدلعني مثل البوتات\nترى ازعل منك اصيح المولاي يغصص بلاعيمك"
+TEXT_3 = "من اشوف زبك يسعبل كسي وتذوب الروح انزل\nلعيرك ذليلة امصة ولباسي مشلوح"
+TEXT_4 = "انزع لباسي الك وتنيكني يبعد كل طموح شكني\nبعيرك وضرطني العافيه ترى فدوة الك اروح"
+
+RESPONSES = [TEXT_1, TEXT_2, TEXT_3, TEXT_4]
+
+PROGRESS_START = "انتظر لأتمعن النظر على الرابط وتفقده\nسيتم ارسال الميديا"
+PROGRESS_TEMPLATE = "انتظر لأتمعن النظر على الرابط وتفقده\nسيتم ارسال الميديا {percent}%"
+ERROR_MESSAGE = "الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي"
+FILE_NOT_FOUND = ERROR_MESSAGE
+
+SUCCESS_MESSAGE = "يدلل بعد كسي\nترى اموت بيك اعشقك هايمه بعيرك"
+STARTUP_MESSAGE = "اشتغل البوت مرتلخ تاج راسي\nارضع عيرك ؟!"
+QUEUE_FULL_MESSAGE = "سته عمليات داشتغل عليهم وبعدك تريد\nلعد شكد ملعوب بعرضك"
+
+BTN_DEV = "تواصل مع المطور"
+BTN_SUPPORT = "ابلاغ الدعم"
+
+EMOJIS = ["🍕", "🌭", "🥪", "🥞", "🍣", "🍔"]
+
+pool = None
+
+async def init_db():
+    global pool
+    pool = await asyncpg.create_pool(dsn=DATABASE_URL)
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id BIGINT PRIMARY KEY,
+                step_counter INT DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS url_cache (
+                url TEXT PRIMARY KEY,
+                file_ids TEXT
+            );
+        """)
+
+async def get_user_step(user_id: int) -> int:
+    global pool
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT step_counter FROM users WHERE user_id = $1", user_id)
+        if row is None:
+            await conn.execute("INSERT INTO users (user_id, step_counter) VALUES ($1, 0)", user_id)
+            return 0
+        return row['step_counter']
+
+async def update_user_step(user_id: int, new_step: int):
+    global pool
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE users SET step_counter = $1 WHERE user_id = $2", new_step, user_id)
+
+async def get_cached_file_ids(url: str):
+    global pool
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT file_ids FROM url_cache WHERE url = $1", url)
+        if row and row['file_ids']:
+            return json.loads(row['file_ids'])
+        return None
+
+async def save_cached_file_ids(url: str, file_ids: list):
+    global pool
+    async with pool.acquire() as conn:
+        json_data = json.dumps(file_ids)
+        await conn.execute(
+            "INSERT INTO url_cache (url, file_ids) VALUES ($1, $2) ON CONFLICT (url) DO UPDATE SET file_ids = $2",
+            url, json_data
+        )
+
+bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+dp = Dispatcher()
 
 user_queues = defaultdict(lambda: asyncio.Queue(maxsize=6))
 user_workers = {}
@@ -38,7 +108,7 @@ def cleanup_stale_files():
                     pass
 
 def get_random_emoji_msg() -> str:
-    return f"\n\n{random.choice(STriNGs.EMOJIS)}"
+    return f"\n\n{random.choice(EMOJIS)}"
 
 def clean_filename_part(text: str) -> str:
     if not text:
@@ -71,8 +141,8 @@ def generate_smart_filename(uploader: str) -> str:
 
 def get_buttons():
     kb = [
-        [types.InlineKeyboardButton(text=STriNGs.BTN_DEV, url=f"tg://user?id={DEVELOPER_ID}", style="primary")],
-        [types.InlineKeyboardButton(text=STriNGs.BTN_SUPPORT, url=f"tg://user?id={SUPPORT_ID}", style="destructive")]
+        [types.InlineKeyboardButton(text=BTN_DEV, url=f"tg://user?id={DEVELOPER_ID}", style="primary")],
+        [types.InlineKeyboardButton(text=BTN_SUPPORT, url=f"tg://user?id={SUPPORT_ID}", style="destructive")]
     ]
     return types.InlineKeyboardMarkup(inline_keyboard=kb)
 
@@ -135,7 +205,7 @@ async def animate_text(message: types.Message, text: str):
         pass
 
 def is_url(text: str) -> bool:
-    if re.search(r't\.me', text, re.IGNORECASE):
+    if re.search(r'(t\.me|youtube\.com|youtu\.be)', text, re.IGNORECASE):
         return False
     regex = r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
     return bool(re.match(regex, text))
@@ -143,7 +213,7 @@ def is_url(text: str) -> bool:
 async def process_download_task(message: types.Message, url_text: str):
     user_id = message.from_user.id
     
-    cached_ids = await DATAbase.get_cached_file_ids(url_text)
+    cached_ids = await get_cached_file_ids(url_text)
     if cached_ids:
         try:
             chunks = [cached_ids[i:i + 8] for i in range(0, len(cached_ids), 8)]
@@ -161,13 +231,13 @@ async def process_download_task(message: types.Message, url_text: str):
                 else:
                     await message.answer_media_group(media=media_group)
                     
-            await message.answer(STriNGs.SUCCESS_MESSAGE + get_random_emoji_msg(), reply_markup=get_buttons())
+            await message.answer(SUCCESS_MESSAGE + get_random_emoji_msg(), reply_markup=get_buttons())
             return
         except Exception:
             pass
 
     cleanup_stale_files()
-    progress_msg = await message.answer(STriNGs.PROGRESS_START)
+    progress_msg = await message.answer(PROGRESS_START)
     last_reported_progress = 0
     downloaded_files = []
     
@@ -181,7 +251,7 @@ async def process_download_task(message: types.Message, url_text: str):
                 if percent >= 20 and percent >= last_reported_progress + 20:
                     last_reported_progress = (percent // 20) * 20
                     asyncio.run_coroutine_threadsafe(
-                        progress_msg.edit_text(STriNGs.PROGRESS_TEMPLATE.format(percent=last_reported_progress)),
+                        progress_msg.edit_text(PROGRESS_TEMPLATE.format(percent=last_reported_progress)),
                         asyncio.get_event_loop()
                     )
 
@@ -245,15 +315,15 @@ async def process_download_task(message: types.Message, url_text: str):
                             uploaded_file_ids.append(sent_msg.document.file_id)
             
             if uploaded_file_ids:
-                await DATAbase.save_cached_file_ids(url_text, uploaded_file_ids)
+                await save_cached_file_ids(url_text, uploaded_file_ids)
                 
-            await message.answer(STriNGs.SUCCESS_MESSAGE + get_random_emoji_msg(), reply_markup=get_buttons())
+            await message.answer(SUCCESS_MESSAGE + get_random_emoji_msg(), reply_markup=get_buttons())
         else:
-            await message.answer(STriNGs.FILE_NOT_FOUND + get_random_emoji_msg())
+            await message.answer(FILE_NOT_FOUND + get_random_emoji_msg())
             
     except Exception as e:
         try:
-            await progress_msg.edit_text(STriNGs.ERROR_MESSAGE + get_random_emoji_msg())
+            await progress_msg.edit_text(ERROR_MESSAGE + get_random_emoji_msg())
         except Exception:
             pass
     finally:
@@ -292,7 +362,7 @@ async def handle_message(message: types.Message):
     if is_url(text):
         queue = user_queues[user_id]
         if queue.full():
-            await message.answer(STriNGs.QUEUE_FULL_MESSAGE + get_random_emoji_msg())
+            await message.answer(QUEUE_FULL_MESSAGE + get_random_emoji_msg())
             return
             
         await queue.put((message, text))
@@ -300,23 +370,23 @@ async def handle_message(message: types.Message):
         if user_id not in user_workers or user_workers[user_id].done():
             user_workers[user_id] = asyncio.create_task(user_queue_worker(user_id))
     else:
-        current_index = await DATAbase.get_user_step(user_id)
-        response_text = STriNGs.RESPONSES[current_index]
+        current_index = await get_user_step(user_id)
+        response_text = RESPONSES[current_index]
         
-        next_index = (current_index + 1) % len(STriNGs.RESPONSES)
-        await DATAbase.update_user_step(user_id, next_index)
+        next_index = (current_index + 1) % len(RESPONSES)
+        await update_user_step(user_id, next_index)
         
         await animate_text(message, response_text)
 
 async def on_startup():
     for admin_id in [DEVELOPER_ID, SUPPORT_ID]:
         try:
-            await bot.send_message(chat_id=admin_id, text=STriNGs.STARTUP_MESSAGE)
+            await bot.send_message(chat_id=admin_id, text=STARTUP_MESSAGE)
         except Exception:
             pass
 
 async def main():
-    await DATAbase.init_db()
+    await init_db()
     if not os.path.exists('downloads'):
         os.makedirs('downloads')
     await on_startup()
