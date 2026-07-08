@@ -18,6 +18,12 @@ async def init_db():
                 file_ids TEXT
             );
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS settings (
+                chat_id INTEGER PRIMARY KEY,
+                mute_notifications INTEGER DEFAULT 0
+            );
+        """)
         await db.commit()
 
 async def get_user_step(user_id: int) -> int:
@@ -49,5 +55,21 @@ async def save_cached_file_ids(url: str, file_ids: list):
         await db.execute(
             "INSERT INTO url_cache (url, file_ids) VALUES (?, ?) ON CONFLICT(url) DO UPDATE SET file_ids = ?",
             (url, json_data, json_data)
+        )
+        await db.commit()
+
+async def get_notification_status(chat_id: int) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT mute_notifications FROM settings WHERE chat_id = ?", (chat_id,)) as cursor:
+            row = await cursor.fetchone()
+            if row is None:
+                return 0
+            return row[0]
+
+async def set_notification_status(chat_id: int, status: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO settings (chat_id, mute_notifications) VALUES (?, ?) ON CONFLICT(chat_id) DO UPDATE SET mute_notifications = ?",
+            (chat_id, status, status)
         )
         await db.commit()

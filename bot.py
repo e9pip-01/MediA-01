@@ -6,7 +6,7 @@ import random
 import string
 from collections import defaultdict, deque
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.enums import ParseMode
+from aiogram.enums import ParseMode, ChatType
 from aiogram.client.default import DefaultBotProperties
 from yt_dlp import YoutubeDL
 
@@ -99,8 +99,7 @@ async def animate_text(message: types.Message, text: str, reply_markup: types.In
             pass
 
     try:
-        markup = reply_markup if reply_markup else STriNGs.get_buttons()
-        await sent_msg.edit_text(text, reply_markup=markup)
+        await sent_msg.edit_text(text, reply_markup=reply_markup)
     except Exception:
         pass
 
@@ -158,6 +157,26 @@ def is_url(text: str) -> bool:
         return False
     regex = r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
     return bool(re.match(regex, text))
+
+def process_custom_languages(text: str) -> str:
+    result = []
+    for char in text:
+        if char.isalpha():
+            if char in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ':
+                if char.lower() in ['a', 'f', 't', 'u', 'g', 'n', 'm', 'j']:
+                    result.append(char.upper())
+                else:
+                    result.append(char.lower())
+            elif char in 'абвгдеёжзийклмнопрстуфхцчшщъыьэюяАБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ':
+                if char.lower() in ['а', 'и', 'б']:
+                    result.append(char.upper())
+                else:
+                    result.append(char.lower())
+            else:
+                result.append(char)
+        else:
+            result.append(char)
+    return "".join(result)
 
 async def process_download_task(message: types.Message, url_text: str):
     asyncio.create_task(trigger_delayed_reaction(bot, message.chat.id, message.message_id))
@@ -298,11 +317,49 @@ async def user_queue_worker(user_id: int):
         finally:
             queue.task_done()
 
+@dp.message(F.content_type.in_({'new_chat_members', 'left_chat_member', 'new_chat_title', 'new_chat_photo', 'delete_chat_photo', 'group_chat_created', 'supergroup_chat_created', 'channel_chat_created', 'migrate_to_chat_id', 'migrate_from_chat_id', 'pinned_message'}))
+async def handle_service_messages(message: types.Message):
+    status = await DATAbase.get_notification_status(message.chat.id)
+    if status == 1:
+        try:
+            await message.delete()
+        except Exception:
+            pass
+
 @dp.message(F.text)
 async def handle_message(message: types.Message):
     text = message.text.strip()
     user_id = message.from_user.id
+    chat_id = message.chat.id
+    chat_type = message.chat.type
     
+    if text.lower() == "ادت":
+        if await STriNGs.is_user_allowed_for_edit(message):
+            await animate_text(message, STriNGs.PANEL_TITLE_MSG, reply_markup=STriNGs.get_buttons())
+            sent_kb = await message.reply("تم تفعيل كيبورد التحكم", reply_markup=STriNGs.get_keyboard_markup())
+            asyncio.create_task(trigger_delayed_reaction(bot, sent_kb.chat.id, sent_kb.message_id))
+        return
+
+    if text == STriNGs.BTN_MUTE:
+        if await STriNGs.is_user_allowed_for_edit(message):
+            await DATAbase.set_notification_status(chat_id, 1)
+            sent_resp = await message.reply(STriNGs.MUTE_SUCCESS_MSG, reply_markup=types.ReplyKeyboardRemove())
+            asyncio.create_task(trigger_delayed_reaction(bot, sent_resp.chat.id, sent_resp.message_id))
+        return
+
+    if text == STriNGs.BTN_UNMUTE:
+        if await STriNGs.is_user_allowed_for_edit(message):
+            await DATAbase.set_notification_status(chat_id, 0)
+            sent_resp = await message.reply(STriNGs.UNMUTE_SUCCESS_MSG, reply_markup=types.ReplyKeyboardRemove())
+            asyncio.create_task(trigger_delayed_reaction(bot, sent_resp.chat.id, sent_resp.message_id))
+        return
+
+    if text == STriNGs.BTN_CANCEL:
+        if await STriNGs.is_user_allowed_for_edit(message):
+            sent_resp = await message.reply(STriNGs.CANCEL_SUCCESS_MSG, reply_markup=types.ReplyKeyboardRemove())
+            asyncio.create_task(trigger_delayed_reaction(bot, sent_resp.chat.id, sent_resp.message_id))
+        return
+
     if is_url(text):
         queue = user_queues[user_id]
         if queue.full():
@@ -314,14 +371,29 @@ async def handle_message(message: types.Message):
         
         if user_id not in user_workers or user_workers[user_id].done():
             user_workers[user_id] = asyncio.create_task(user_queue_worker(user_id))
+        return
+
+    has_english = bool(re.search(r'[a-zA-Z]', text))
+    has_russian = bool(re.search(r'[а-яА-Я]', text))
+    
+    if has_english or has_russian:
+        processed_text = process_custom_languages(text)
+        sent_custom = await message.reply(processed_text, reply_markup=STriNGs.get_buttons())
+        asyncio.create_task(trigger_delayed_reaction(bot, sent_custom.chat.id, sent_custom.message_id))
+        return
+
+    if chat_type in [ChatType.GROUP, ChatType.SUPERGROUP, ChatType.CHANNEL]:
+        if text == "بوت":
+            current_index = await DATAbase.get_user_step(user_id)
+            handler_func = STriNGs.RESPONSE_HANDLERS[current_index]
+            next_index = (current_index + 1) % len(STriNGs.RESPONSE_HANDLERS)
+            await DATAbase.update_user_step(user_id, next_index)
+            await handler_func(message, animate_text)
     else:
         current_index = await DATAbase.get_user_step(user_id)
-        
         handler_func = STriNGs.RESPONSE_HANDLERS[current_index]
-        
         next_index = (current_index + 1) % len(STriNGs.RESPONSE_HANDLERS)
         await DATAbase.update_user_step(user_id, next_index)
-        
         await handler_func(message, animate_text)
 
 async def on_startup():
