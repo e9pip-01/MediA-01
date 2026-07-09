@@ -3,5 +3,4 @@ aiosqlite
 yt-dlp
 aiohttp
 aiodns
-cchardet
 uvloop
