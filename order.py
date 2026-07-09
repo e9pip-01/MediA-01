@@ -20,18 +20,22 @@ async def handle_inline_buttons(callback: types.CallbackQuery, bot: Bot, trigger
     invoker_id = int(data_parts[2])
 
     user_id = callback.from_user.id
+    chat_type = callback.message.chat.type
     
-    try:
-        member = await callback.message.chat.get_member(user_id)
-        is_admin_or_owner = member.status in ['creator', 'administrator']
-    except Exception:
-        is_admin_or_owner = False
+    if chat_type == ChatType.CHANNEL:
+        is_admin_or_owner = True
+    else:
+        try:
+            member = await callback.message.chat.get_member(user_id)
+            is_admin_or_owner = member.status in ['creator', 'administrator']
+        except Exception:
+            is_admin_or_owner = False
 
     if not is_admin_or_owner:
         await callback.answer("¹# - هذه الازرار للمشرفين والمالكين فقط\nتوكل لا انيج امك ابن عيري", show_alert=True)
         return
 
-    if user_id != invoker_id:
+    if chat_type != ChatType.CHANNEL and user_id != invoker_id:
         await callback.answer("¹# - هذه الازرار مصممه لتفهم نقرات من\nاستدعاها فقط", show_alert=True)
         return
 

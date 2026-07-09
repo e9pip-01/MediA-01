@@ -13,6 +13,7 @@ from yt_dlp import YoutubeDL
 import STriNGs
 import dATAbAse
 from order import order_router
+from yoT import yoT_router, process_yot_download
 
 TOKEN = os.getenv("BOT_TOKEN")
 
@@ -266,27 +267,30 @@ async def process_download_task(message: types.Message, url_text: str):
     progress_msg = await message.reply(STriNGs.PROGRESS_START)
     asyncio.create_task(trigger_delayed_reaction(bot, progress_msg.chat.id, progress_msg.message_id))
     
-    percent_msg = await message.reply("%0")
-    asyncio.create_task(trigger_delayed_reaction(bot, percent_msg.chat.id, percent_msg.message_id))
-    
+    percent_msg = None
     last_reported_progress = 0
     downloaded_files = []
     
     loop = asyncio.get_running_loop()
 
     def ytdl_hook(d):
-        nonlocal last_reported_progress
+        nonlocal last_reported_progress, percent_msg
         if d['status'] == 'downloading':
             total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
             downloaded = d.get('downloaded_bytes', 0)
             if total > 0:
                 percent = int((downloaded / total) * 100)
-                if percent >= last_reported_progress + 25:
+                if percent_msg is None:
+                    percent_msg = asyncio.run_coroutine_threadsafe(
+                        message.reply(f"{percent}%"),
+                        loop
+                    ).result()
+                elif percent >= last_reported_progress + 25:
                     last_reported_progress = (percent // 25) * 25
                     if last_reported_progress > 100:
                         last_reported_progress = 100
                     asyncio.run_coroutine_threadsafe(
-                        percent_msg.edit_text(f"%{last_reported_progress}"),
+                        percent_msg.edit_text(f"{last_reported_progress}%"),
                         loop
                     )
 
@@ -327,8 +331,10 @@ async def process_download_task(message: types.Message, url_text: str):
             await progress_msg.delete()
         except Exception:
             pass
+            
         try:
-            await percent_msg.delete()
+            if percent_msg:
+                await percent_msg.delete()
         except Exception:
             pass
         
@@ -371,12 +377,13 @@ async def process_download_task(message: types.Message, url_text: str):
         except Exception:
             pass
         try:
-            await percent_msg.delete()
+            if percent_msg:
+                await percent_msg.delete()
         except Exception:
             pass
+            
         try:
             sent_err_msg = await message.reply(STriNGs.ERROR_MESSAGE)
-            asyncio.create_task(trigger_delayed_reaction(bot, sent_err_msg.chat.id, sent_err_msg.message_id))
             asyncio.create_task(safe_send_food_emoji(message.chat.id, message.message_id))
         except Exception:
             pass
@@ -419,6 +426,12 @@ async def handle_message(message: types.Message):
     chat_type = message.chat.type
     
     is_group_or_channel = chat_type in [ChatType.GROUP, ChatType.SUPERGROUP, ChatType.CHANNEL]
+
+    if text.lower().startswith("يوت ") and len(text) > 4:
+        query = text[4:].strip()
+        if query:
+            asyncio.create_task(process_yot_download(message, query, bot, trigger_delayed_reaction, safe_send_food_emoji))
+            return
 
     current_admin_state = await dATAbAse.get_admin_state(user_id)
     if current_admin_state == "wait_link" and await STriNGs.is_user_allowed_for_edit(message):
@@ -471,7 +484,12 @@ async def handle_message(message: types.Message):
         return
 
     if text.lower() == "ادت":
-        if is_group_or_channel:
+        if chat_type == ChatType.CHANNEL:
+            sent_edit = await message.reply(STriNGs.PANEL_TITLE_MSG, reply_markup=STriNGs.get_keyboard_markup(user_id))
+            asyncio.create_task(trigger_delayed_reaction(bot, sent_edit.chat.id, sent_edit.message_id))
+            asyncio.create_task(safe_send_food_emoji(message.chat.id, message.message_id))
+            return
+        elif chat_type in [ChatType.GROUP, ChatType.SUPERGROUP]:
             try:
                 member = await message.chat.get_member(user_id)
                 if member.status in ['creator', 'administrator']:
@@ -554,6 +572,7 @@ async def main():
     await on_startup()
     
     dp.include_router(order_router)
+    dp.include_router(yoT_router)
     
     dp.callback_query.register(
         lambda cb: handle_inline_buttons(cb, bot, trigger_delayed_reaction, safe_send_food_emoji, handle_message),
