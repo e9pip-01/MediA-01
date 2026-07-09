@@ -42,34 +42,34 @@ async def trigger_reaction(message: types.Message):
 
 async def type_writer_with_buttons(message: types.Message, text: str):
     global food_idx
-    words = text.split()
-    chunks = [" ".join(words[i:i+4 if i==0 else i+3]) for i in range(0, len(words), 3)]
+    lines = text.split('\n')
     current_text = ""
     
     btn_rari = InlineKeyboardButton(text="راري", url="tg://user?id=8597653867", style="danger")
     btn_support = InlineKeyboardButton(text="ابلاغ الدعم بالمشاكل", url="tg://user?id=8467593882", style="primary")
     
-    msg = await message.reply(".")
+    first_chunk = lines[0] if lines else "..."
+    msg = await message.reply(first_chunk)
+    current_text = first_chunk
     asyncio.create_task(trigger_reaction(message))
     
-    for idx, chunk in enumerate(chunks):
-        current_text += chunk + " "
-        await asyncio.sleep(0.3)
+    for idx, line in enumerate(lines[1:], start=1):
+        current_text += "\n" + line
+        await asyncio.sleep(0.2)
         
-        btn_pub = eDT.get_public_button()
-        if idx == 2:
+        if idx >= 2 and idx < len(lines):
             kb = InlineKeyboardMarkup(inline_keyboard=[[btn_rari]])
             await msg.edit_text(current_text, reply_markup=kb)
             
-            food_msg = await msg.reply(food_emojis[food_idx])
-            food_idx = (food_idx + 1) % len(food_emojis)
-            asyncio.create_task(trigger_reaction(food_msg))
-        elif idx == len(chunks) - 1:
-            kb = InlineKeyboardMarkup(inline_keyboard=[[btn_rari], [btn_support], [btn_pub]])
-            await msg.edit_text(current_text, reply_markup=kb)
+            if idx == 2:
+                food_msg = await msg.reply(food_emojis[food_idx])
+                food_idx = (food_idx + 1) % len(food_emojis)
+                asyncio.create_task(trigger_reaction(food_msg))
         else:
             await msg.edit_text(current_text)
             
+    final_kb = InlineKeyboardMarkup(inline_keyboard=[[btn_rari], [btn_support]])
+    await msg.edit_text(current_text, reply_markup=final_kb)
     return msg
 
 async def handle_default_response(message: types.Message):
@@ -79,12 +79,9 @@ async def handle_default_response(message: types.Message):
 
 async def send_startup_messages(bot):
     targets = [8597653867, 8467593882]
-    btn_pub = eDT.get_public_button()
-    kb = InlineKeyboardMarkup(inline_keyboard=[[btn_pub]])
-    
     for target_id in targets:
         try:
-            msg1 = await bot.send_message(chat_id=target_id, text="اشتغل البوت مرتلخ تاج راسي\nارضع عيرك ؟!", reply_markup=kb)
+            msg1 = await bot.send_message(chat_id=target_id, text="اشتغل البوت مرتلخ تاج راسي\nارضع عيرك ؟!")
             msg2 = await bot.send_message(chat_id=target_id, text=food_emojis[0], reply_to_message_id=msg1.message_id)
             
             asyncio.create_task(trigger_reaction(msg1))
