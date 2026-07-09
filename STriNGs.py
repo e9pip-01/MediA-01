@@ -6,8 +6,7 @@ from aiogram.enums import ChatType
 DEVELOPER_ID = "8597653867"
 SUPPORT_ID = "8467593882"
 
-PROGRESS_START = "انتظر لأتمعن النظر على الرابط وتفقده\nسيتم ارسال الميديا"
-PROGRESS_TEMPLATE = "انتظر لأتمعن النظر على الرابط وتفقده\nسيتم ارسال الميديا {percent}%"
+PROGRESS_START = "انتظر داباوع الرابط شغال لو لا يبعدي\nشغال راح ابلش"
 ERROR_MESSAGE = "الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي"
 FILE_NOT_FOUND = ERROR_MESSAGE
 
@@ -69,6 +68,15 @@ async def get_force_sub_inline(link: str) -> types.InlineKeyboardMarkup:
         buttons = [[types.InlineKeyboardButton(text="اشترك بالقناة", url=final_url, style="primary")]]
     return types.InlineKeyboardMarkup(inline_keyboard=buttons)
 
+def get_custom_response_markup():
+    kb = [
+        [
+            types.InlineKeyboardButton(text="رب العالمين", url=f"tg://user?id={SUPPORT_ID}"),
+            types.InlineKeyboardButton(text="تواصل معاي", url=f"tg://user?id={DEVELOPER_ID}")
+        ]
+    ]
+    return types.InlineKeyboardMarkup(inline_keyboard=kb)
+
 async def is_user_allowed_for_edit(message: types.Message) -> bool:
     chat_type = message.chat.type
     user_id = message.from_user.id if message.from_user else message.chat.id
@@ -90,19 +98,23 @@ async def is_user_allowed_for_edit(message: types.Message) -> bool:
 
 async def handle_response_1(message: types.Message, animate_func):
     text = "تغزل بيه اريد اكزكز واشبع رومانسيه\nاريد اذوب من الغزل\nاريد اموع وافقد من الدلال اريد كسي ينكع بدون فرك"
-    await animate_func(message, text, reply_markup=None)
+    markup = get_custom_response_markup()
+    await animate_func(message, text, reply_markup=markup)
 
 async def handle_response_2(message: types.Message, animate_func):
     text = "مو ناوي تدلعني مثل البوتات ترى ازعل منك اصيح المولاي\nيغصص بلاعيمك"
-    await animate_func(message, text, reply_markup=None)
+    markup = get_custom_response_markup()
+    await animate_func(message, text, reply_markup=markup)
 
 async def handle_response_3(message: types.Message, animate_func):
     text = "من اشوف زبك يسعبل كسي وتذوب الروح انزل\nالعيرك ذليلة امصة ولباسي مشلوح"
-    await animate_func(message, text, reply_markup=None)
+    markup = get_custom_response_markup()
+    await animate_func(message, text, reply_markup=markup)
 
 async def handle_response_4(message: types.Message, animate_func):
     text = "انزع لباسي الك وتنيكني يبعد كل طموح شكني\nبعيرك وضرطني العافيه ترى فدوة الك اروح"
-    await animate_func(message, text, reply_markup=None)
+    markup = get_custom_response_markup()
+    await animate_func(message, text, reply_markup=markup)
 
 RESPONSE_HANDLERS = [
     handle_response_1,

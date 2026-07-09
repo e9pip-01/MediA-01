@@ -12,7 +12,7 @@ from yt_dlp import YoutubeDL
 
 import STriNGs
 import dATAbAse
-from order import order_router, process_whisper_command, process_whisper_input, handle_start_whisper_session
+from order import order_router
 
 TOKEN = os.getenv("BOT_TOKEN")
 
@@ -58,7 +58,7 @@ async def safe_send_food_emoji(chat_id: int, trigger_msg_id: int):
                 processed_food_messages.clear()
                 processed_food_messages.add(task_key)
 
-        await asyncio.sleep(1.2)
+        await asyncio.sleep(1.0)
         async with emoji_lock:
             idx = await dATAbAse.get_next_emoji_index()
             emoji = STriNGs.FOOD_EMOJIS[idx]
@@ -80,8 +80,8 @@ async def animate_text(message: types.Message, text: str, reply_markup: types.In
     if parsed_lines:
         line_active[0] = True
 
-    first_chunk = " ".join(parsed_lines[0][0:3])
-    line_indices[0] = 3
+    first_chunk = " ".join(parsed_lines[0][0:7])
+    line_indices[0] = 7
     line_toggles[0] = False
     
     sent_msg = await message.reply(first_chunk)
@@ -103,7 +103,7 @@ async def animate_text(message: types.Message, text: str, reply_markup: types.In
             words = parsed_lines[idx]
             
             if line_active[idx] and line_indices[idx] < len(words):
-                take = 3 if line_toggles[idx] else 2
+                take = 7 if line_toggles[idx] else 3
                 line_toggles[idx] = not line_toggles[idx]
                 line_indices[idx] += take
                 
@@ -193,7 +193,7 @@ def process_custom_languages(text: str) -> str:
                     result.append(char.upper())
                 else:
                     result.append(char.lower())
-            elif char in 'عبدفغهخحجكمنتبالبيسشظزوةىلارؤءئإلأآلإ':
+            elif char in 'абвгдеёжзийклмнопрстуфхцчшщъыьэюяАБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ':
                 if char.lower() in ['а', 'и', 'б']:
                     result.append(char.upper())
                 else:
@@ -265,6 +265,10 @@ async def process_download_task(message: types.Message, url_text: str):
     cleanup_stale_files()
     progress_msg = await message.reply(STriNGs.PROGRESS_START)
     asyncio.create_task(trigger_delayed_reaction(bot, progress_msg.chat.id, progress_msg.message_id))
+    
+    percent_msg = await message.reply("%0")
+    asyncio.create_task(trigger_delayed_reaction(bot, percent_msg.chat.id, percent_msg.message_id))
+    
     last_reported_progress = 0
     downloaded_files = []
     
@@ -277,15 +281,17 @@ async def process_download_task(message: types.Message, url_text: str):
             downloaded = d.get('downloaded_bytes', 0)
             if total > 0:
                 percent = int((downloaded / total) * 100)
-                if percent > 10 and percent >= last_reported_progress + 20:
-                    last_reported_progress = (percent // 20) * 20
+                if percent >= last_reported_progress + 25:
+                    last_reported_progress = (percent // 25) * 25
+                    if last_reported_progress > 100:
+                        last_reported_progress = 100
                     asyncio.run_coroutine_threadsafe(
-                        progress_msg.edit_text(STriNGs.PROGRESS_TEMPLATE.format(percent=last_reported_progress)),
+                        percent_msg.edit_text(f"%{last_reported_progress}"),
                         loop
                     )
 
     ydl_opts = {
-        'format': 'best',
+        'format': 'bestvideo+bestaudio/best',
         'progress_hooks': [ytdl_hook],
         'quiet': True,
         'no_warnings': True,
@@ -307,7 +313,7 @@ async def process_download_task(message: types.Message, url_text: str):
         for entry in entries:
             custom_name = generate_smart_filename(uploader)
             entry_opts = {
-                'format': 'best',
+                'format': 'bestvideo+bestaudio/best',
                 'outtmpl': f'downloads/{custom_name}.%(ext)s',
                 'quiet': True,
                 'no_warnings': True
@@ -317,7 +323,14 @@ async def process_download_task(message: types.Message, url_text: str):
             if os.path.exists(filename):
                 downloaded_files.append(filename)
 
-        await progress_msg.delete()
+        try:
+            await progress_msg.delete()
+        except Exception:
+            pass
+        try:
+            await percent_msg.delete()
+        except Exception:
+            pass
         
         if downloaded_files:
             chunks = [downloaded_files[i:i + 8] for i in range(0, len(downloaded_files), 8)]
@@ -354,7 +367,16 @@ async def process_download_task(message: types.Message, url_text: str):
             
     except Exception:
         try:
-            await progress_msg.edit_text(STriNGs.ERROR_MESSAGE)
+            await progress_msg.delete()
+        except Exception:
+            pass
+        try:
+            await percent_msg.delete()
+        except Exception:
+            pass
+        try:
+            sent_err_msg = await message.reply(STriNGs.ERROR_MESSAGE)
+            asyncio.create_task(trigger_delayed_reaction(bot, sent_err_msg.chat.id, sent_err_msg.message_id))
             asyncio.create_task(safe_send_food_emoji(message.chat.id, message.message_id))
         except Exception:
             pass
@@ -397,16 +419,6 @@ async def handle_message(message: types.Message):
     chat_type = message.chat.type
     
     is_group_or_channel = chat_type in [ChatType.GROUP, ChatType.SUPERGROUP, ChatType.CHANNEL]
-
-    if chat_type == ChatType.PRIVATE and text.startswith("/start whsp_"):
-        payload = text.split("/start ")[1]
-        await handle_start_whisper_session(message, payload, bot, trigger_delayed_reaction, safe_send_food_emoji)
-        return
-
-    if chat_type == ChatType.PRIVATE:
-        whisper_processed = await process_whisper_input(message, bot, trigger_delayed_reaction, safe_send_food_emoji)
-        if whisper_processed:
-            return
 
     current_admin_state = await dATAbAse.get_admin_state(user_id)
     if current_admin_state == "wait_link" and await STriNGs.is_user_allowed_for_edit(message):
@@ -503,7 +515,7 @@ async def handle_message(message: types.Message):
         return
 
     has_english = bool(re.search(r'[a-zA-Z]', text))
-    has_russian = bool(re.search(r'[а-яА-Я]', text))
+    has_russian = bool(re.search(r'[а-яА-ЯёЁ]', text))
     
     if (has_english or has_russian) and not (validate_custom_username(text) and not text.startswith("@")):
         processed_text = process_custom_languages(text)
@@ -546,10 +558,6 @@ async def main():
     dp.callback_query.register(
         lambda cb: handle_inline_buttons(cb, bot, trigger_delayed_reaction, safe_send_food_emoji, handle_message),
         F.data.startswith("btn_")
-    )
-    dp.message.register(
-        lambda msg: process_whisper_command(msg, bot, trigger_delayed_reaction, safe_send_food_emoji),
-        lambda msg: any(x in msg.text for x in ["همسة", "همسه", "اهمس", "همس"]) if msg.text else False
     )
     
     await dp.start_polling(bot)
