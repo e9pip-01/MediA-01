@@ -206,13 +206,9 @@ async def link_download_handler(message: types.Message):
                         file_data = f.read()
                     
                     await bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
+                    await bot.delete_message(chat_id=message.chat.id, message_id=progress_msg.message_id)
                     
-                    sent_doc = await bot.edit_message_media(
-                        chat_id=message.chat.id,
-                        message_id=progress_msg.message_id,
-                        media=types.InputMediaDocument(media=BufferedInputFile(file_data, filename=filename)),
-                        reply_markup=kb
-                    )
+                    sent_doc = await message.reply_document(BufferedInputFile(file_data, filename=filename), reply_markup=kb)
                     await message.reply("يدلل بعد كسي\nترى اموت بيك اعشقك هايمه بعيرك", reply_markup=kb)
                     
                     if sent_doc.document:
@@ -221,6 +217,7 @@ async def link_download_handler(message: types.Message):
                     cAshe.clear_system_file(full_path)
         except Exception:
             try:
+                await bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
                 await progress_msg.edit_text("الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي")
             except:
                 pass

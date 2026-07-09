@@ -8,7 +8,6 @@ from aiogram import types
 from aiogram.types import BufferedInputFile, InlineKeyboardMarkup
 import cAshe
 import eDT
-import bUTToNs
 
 def is_arabic(text):
     return any('\u0600' <= char <= '\u06FF' for char in text)
@@ -60,7 +59,7 @@ async def download_youtube_audio(message: types.Message):
             
             if cached_id:
                 await message.bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
-                await message.reply_audio(cached_id, reply_markup=kb)
+                await message.reply_voice(cached_id, reply_markup=kb)
                 return
 
         progress_msg = await message.reply("0%")
@@ -107,16 +106,12 @@ async def download_youtube_audio(message: types.Message):
             file_data = f.read()
             
         await message.bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
+        await message.bot.delete_message(chat_id=message.chat.id, message_id=progress_msg.message_id)
         
-        sent_audio = await message.bot.edit_message_media(
-            chat_id=message.chat.id,
-            message_id=progress_msg.message_id,
-            media=types.InputMediaAudio(media=BufferedInputFile(file_data, filename=filename)),
-            reply_markup=kb
-        )
+        sent_voice = await message.reply_voice(BufferedInputFile(file_data, filename=filename), reply_markup=kb)
         
-        if video_id and sent_audio.audio:
-            await cAshe.set_yt_cache(video_id, sent_audio.audio.file_id)
+        if video_id and sent_voice.voice:
+            await cAshe.set_yt_cache(video_id, sent_voice.voice.file_id)
             
         cAshe.clear_system_file(full_path)
     except Exception:
