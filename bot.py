@@ -72,16 +72,15 @@ async def animate_text(message: types.Message, text: str, reply_markup: types.In
     asyncio.create_task(trigger_delayed_reaction(bot, message.chat.id, message.message_id))
 
     lines = text.split('\n')
-    parsed_lines = [line.split() for line in lines]
     
     line_indices = [0] * len(lines)
     line_toggles = [True] * len(lines)
     line_active = [False] * len(lines)
     
-    if parsed_lines:
+    if lines:
         line_active[0] = True
 
-    first_chunk = " ".join(parsed_lines[0][0:7])
+    first_chunk = lines[0][0:7]
     line_indices[0] = 7
     line_toggles[0] = False
     
@@ -92,7 +91,7 @@ async def animate_text(message: types.Message, text: str, reply_markup: types.In
     while True:
         all_done = True
         for idx in range(len(lines)):
-            if line_indices[idx] < len(parsed_lines[idx]):
+            if line_indices[idx] < len(lines[idx]):
                 all_done = False
                 break
         if all_done:
@@ -101,17 +100,17 @@ async def animate_text(message: types.Message, text: str, reply_markup: types.In
         current_display_lines = []
         
         for idx in range(len(lines)):
-            words = parsed_lines[idx]
+            full_line = lines[idx]
             
-            if line_active[idx] and line_indices[idx] < len(words):
-                take = 7 if line_toggles[idx] else 3
+            if line_active[idx] and line_indices[idx] < len(full_line):
+                take = 7 if line_toggles[idx] else 6
                 line_toggles[idx] = not line_toggles[idx]
                 line_indices[idx] += take
                 
                 if idx + 1 < len(lines) and not line_active[idx + 1]:
                     line_active[idx + 1] = True
 
-            current_line_text = " ".join(words[:line_indices[idx]])
+            current_line_text = full_line[:line_indices[idx]]
             if current_line_text or idx < len(lines) - 1:
                 current_display_lines.append(current_line_text)
 
