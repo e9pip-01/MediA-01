@@ -2,7 +2,6 @@ import asyncio
 import random
 from aiogram import types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-import eDT
 
 responses = [
     "تغزل بيه اريد اكزكز واشبع رومانسيه\nاريد اذوب من الغزل\nاريد اموع وافقد من الدلال اريد كسي ينكع بدون فرك",
@@ -42,8 +41,8 @@ async def type_writer_with_buttons(message: types.Message, text: str):
     global food_idx
     lines = text.split('\n')
     
-    btn_rari = InlineKeyboardButton(text="راري", url="tg://user?id=8597653867", style="danger")
-    btn_support = InlineKeyboardButton(text="ابلاغ الدعم بالمشاكل", url="tg://user?id=8467593882", style="primary")
+    btn_rari = InlineKeyboardButton(text="راري", url="tg://user?id=8597653867")
+    btn_support = InlineKeyboardButton(text="ابلاغ الدعم بالمشاكل", url="tg://user?id=8467593882")
     
     current_text = lines[0]
     msg = await message.reply(current_text)

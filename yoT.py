@@ -8,6 +8,7 @@ from aiogram import types
 from aiogram.types import BufferedInputFile, InlineKeyboardMarkup
 import cAshe
 import eDT
+import bUTToNs
 
 def is_arabic(text):
     return any('\u0600' <= char <= '\u06FF' for char in text)
@@ -59,17 +60,20 @@ async def download_youtube_audio(message: types.Message):
             
             if cached_id:
                 await message.bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
-                await message.reply_voice(cached_id, reply_markup=kb)
+                await message.reply_audio(cached_id, reply_markup=kb)
                 return
 
         progress_msg = await message.reply("0%")
+        last_percent = -1
 
         def progress_hook(d):
+            nonlocal last_percent
             if d['status'] == 'downloading':
-                p = d.get('_percent_str', '0%').replace('%', '')
+                p = d.get('_percent_str', '0%').strip().replace('%', '')
                 try:
                     val = int(float(p))
-                    if val % 25 == 0:
+                    if val % 25 == 0 and val != last_percent:
+                        last_percent = val
                         asyncio.run_coroutine_threadsafe(progress_msg.edit_text(f"{val}%"), message.bot.session.loop)
                 except: pass
 
@@ -106,12 +110,16 @@ async def download_youtube_audio(message: types.Message):
             file_data = f.read()
             
         await message.bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
-        await message.bot.delete_message(chat_id=message.chat.id, message_id=progress_msg.message_id)
         
-        sent_voice = await message.reply_voice(BufferedInputFile(file_data, filename=filename), reply_markup=kb)
+        sent_audio = await message.bot.edit_message_media(
+            chat_id=message.chat.id,
+            message_id=progress_msg.message_id,
+            media=types.InputMediaAudio(media=BufferedInputFile(file_data, filename=filename)),
+            reply_markup=kb
+        )
         
-        if video_id and sent_voice.voice:
-            await cAshe.set_yt_cache(video_id, sent_voice.voice.file_id)
+        if video_id and sent_audio.audio:
+            await cAshe.set_yt_cache(video_id, sent_audio.audio.file_id)
             
         cAshe.clear_system_file(full_path)
     except Exception:

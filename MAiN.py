@@ -119,12 +119,16 @@ async def link_download_handler(message: types.Message):
         progress_msg = await message.reply("0%")
         asyncio.create_task(bUTToNs.trigger_reaction(message))
 
+        last_percent = -1
+
         def progress_hook(d):
+            nonlocal last_percent
             if d['status'] == 'downloading':
-                p = d.get('_percent_str', '0%').replace('%', '')
+                p = d.get('_percent_str', '0%').strip().replace('%', '')
                 try:
                     val = int(float(p))
-                    if val % 25 == 0:
+                    if val % 25 == 0 and val != last_percent:
+                        last_percent = val
                         asyncio.run_coroutine_threadsafe(progress_msg.edit_text(f"{val}%"), bot.session.loop)
                 except: pass
 
@@ -206,9 +210,13 @@ async def link_download_handler(message: types.Message):
                         file_data = f.read()
                     
                     await bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
-                    await bot.delete_message(chat_id=message.chat.id, message_id=progress_msg.message_id)
                     
-                    sent_doc = await message.reply_document(BufferedInputFile(file_data, filename=filename), reply_markup=kb)
+                    sent_doc = await bot.edit_message_media(
+                        chat_id=message.chat.id,
+                        message_id=progress_msg.message_id,
+                        media=types.InputMediaDocument(media=BufferedInputFile(file_data, filename=filename)),
+                        reply_markup=kb
+                    )
                     await message.reply("يدلل بعد كسي\nترى اموت بيك اعشقك هايمه بعيرك", reply_markup=kb)
                     
                     if sent_doc.document:
@@ -217,7 +225,6 @@ async def link_download_handler(message: types.Message):
                     cAshe.clear_system_file(full_path)
         except Exception:
             try:
-                await bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
                 await progress_msg.edit_text("الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي")
             except:
                 pass
