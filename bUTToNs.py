@@ -16,60 +16,66 @@ emojis = ["🥰", "😭", "🤗", "😘", "🍓", "🍌", "🤣"]
 food_emojis = ["🍟", "🍔", "🍕", "🥪", "🍣", "🥞", "🌭"]
 
 resp_idx = 0
-last_reactions = []
-last_times = []
 food_idx = 0
+recent_reactions = []
 
 async def trigger_reaction(message: types.Message):
-    global last_reactions, last_times
+    global recent_reactions
     try:
-        available_reacts = [r for r in emojis if r not in last_reactions]
+        available_reacts = [r for r in emojis if r not in recent_reactions]
+        if not available_reacts:
+            recent_reactions.clear()
+            available_reacts = emojis.copy()
+            
         react = random.choice(available_reacts)
-        last_reactions.append(react)
-        if len(last_reactions) > 6: 
-            last_reactions.pop(0)
-        
-        available_times = [t for t in [2.4, 4.8, 6.3, 4.2, 3.6] if t not in last_times]
-        wait_time = random.choice(available_times)
-        last_times.append(wait_time)
-        if len(last_times) > 2: 
-            last_times.pop(0)
-        
+        recent_reactions.append(react)
+        if len(recent_reactions) > 4:
+            recent_reactions.pop(0)
+            
+        wait_time = random.choice([2.4, 4.8, 6.3, 4.2, 3.6])
         await asyncio.sleep(wait_time)
         await message.react([types.ReactionTypeEmoji(emoji=react)])
     except:
         pass
 
-async def type_writer_with_buttons(message: types.Message, text: str):
+async def type_writer_with_buttons(message: types.Message, text: str, is_startup=False):
     global food_idx
-    lines = text.split('\n')
-    current_text = ""
+    words = text.split()
+    chunks = [" ".join(words[i:i+4 if i==0 else i+3]) for i in range(0, len(words), 3)]
     
-    btn_rari = InlineKeyboardButton(text="راري", url="tg://user?id=8597653867", style="danger")
-    btn_support = InlineKeyboardButton(text="ابلاغ الدعم بالمشاكل", url="tg://user?id=8467593882", style="primary")
+    btn_rari = InlineKeyboardButton(text="راري", url="tg://user?id=8597653867")
+    btn_support = InlineKeyboardButton(text="ابلاغ الدعم بالمشاكل", url="tg://user?id=8467593882")
     
-    first_chunk = lines[0] if lines else "..."
-    msg = await message.reply(first_chunk)
-    current_text = first_chunk
-    asyncio.create_task(trigger_reaction(message))
+    current_text = chunks[0] + " "
+    msg = await message.reply(current_text)
     
-    for idx, line in enumerate(lines[1:], start=1):
-        current_text += "\n" + line
-        await asyncio.sleep(0.2)
+    if not is_startup:
+        asyncio.create_task(trigger_reaction(message))
+    
+    for idx, chunk in enumerate(chunks[1:], start=1):
+        current_text += chunk + " "
+        await asyncio.sleep(0.3)
         
-        if idx >= 2 and idx < len(lines):
-            kb = InlineKeyboardMarkup(inline_keyboard=[[btn_rari]])
-            await msg.edit_text(current_text, reply_markup=kb)
-            
-            if idx == 2:
-                food_msg = await msg.reply(food_emojis[food_idx])
-                food_idx = (food_idx + 1) % len(food_emojis)
-                asyncio.create_task(trigger_reaction(food_msg))
+        if is_startup:
+            if idx == len(chunks) - 1:
+                kb = InlineKeyboardMarkup(inline_keyboard=[[btn_rari]])
+                await msg.edit_text(current_text, reply_markup=kb)
+            else:
+                await msg.edit_text(current_text)
         else:
-            await msg.edit_text(current_text)
-            
-    final_kb = InlineKeyboardMarkup(inline_keyboard=[[btn_rari], [btn_support]])
-    await msg.edit_text(current_text, reply_markup=final_kb)
+            if idx == 1:
+                await msg.edit_text(current_text)
+            elif idx >= 2 and idx < len(chunks) - 1:
+                kb = InlineKeyboardMarkup(inline_keyboard=[[btn_rari]])
+                await msg.edit_text(current_text, reply_markup=kb)
+                
+                if idx == 2:
+                    food_msg = await msg.reply(food_emojis[food_idx])
+                    food_idx = (food_idx + 1) % len(food_emojis)
+            elif idx == len(chunks) - 1:
+                kb = InlineKeyboardMarkup(inline_keyboard=[[btn_rari], [btn_support]])
+                await msg.edit_text(current_text, reply_markup=kb)
+                
     return msg
 
 async def handle_default_response(message: types.Message):
@@ -81,10 +87,16 @@ async def send_startup_messages(bot):
     targets = [8597653867, 8467593882]
     for target_id in targets:
         try:
-            msg1 = await bot.send_message(chat_id=target_id, text="اشتغل البوت مرتلخ تاج راسي\nارضع عيرك ؟!")
-            msg2 = await bot.send_message(chat_id=target_id, text=food_emojis[0], reply_to_message_id=msg1.message_id)
+            fake_msg = types.Message(
+                message_id=0,
+                date=None,
+                chat=types.Chat(id=target_id, type="private"),
+                from_user=types.User(id=target_id, is_bot=False, first_name="User"),
+                text=""
+            )
+            fake_msg._bot = bot
             
-            asyncio.create_task(trigger_reaction(msg1))
-            asyncio.create_task(trigger_reaction(msg2))
+            msg1 = await type_writer_with_buttons(fake_msg, "اشتغل البوت مرتلخ تاج راسي\nارضع عيرك ؟!", is_startup=True)
+            msg2 = await bot.send_message(chat_id=target_id, text=food_emojis[0], reply_to_message_id=msg1.message_id)
         except:
             pass

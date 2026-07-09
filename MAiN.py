@@ -115,20 +115,11 @@ async def link_download_handler(message: types.Message):
         return
 
     async def task():
-        msg = await message.reply("0%")
+        msg = await message.reply("جاري التحميل...")
         asyncio.create_task(bUTToNs.trigger_reaction(message))
-
-        def progress_hook(d):
-            if d['status'] == 'downloading':
-                p = d.get('_percent_str', '0%').replace('%', '')
-                try:
-                    if int(float(p)) % 25 == 0:
-                        asyncio.run_coroutine_threadsafe(msg.edit_text(f"{p}%"), bot.session.loop)
-                except: pass
 
         opts = {
             'format': 'best',
-            'progress_hooks': [progress_hook],
             'quiet': True,
             'outtmpl': '%(title)s.%(ext)s'
         }
