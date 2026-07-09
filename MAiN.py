@@ -115,21 +115,15 @@ async def link_download_handler(message: types.Message):
         return
 
     async def task():
-        status_msg = await message.reply(f"بدءت بالعثور ع {url} انتظر بليز\nدادي")
-        progress_msg = await message.reply("0%")
+        msg = await message.reply("جاري بدء المعالجة...")
         asyncio.create_task(bUTToNs.trigger_reaction(message))
 
-        last_percent = -1
-
         def progress_hook(d):
-            nonlocal last_percent
             if d['status'] == 'downloading':
-                p = d.get('_percent_str', '0%').strip().replace('%', '')
+                p = d.get('_percent_str', '0%').replace('%', '')
                 try:
-                    val = int(float(p))
-                    if val % 25 == 0 and val != last_percent:
-                        last_percent = val
-                        asyncio.run_coroutine_threadsafe(progress_msg.edit_text(f"{val}%"), bot.session.loop)
+                    if int(float(p)) % 25 == 0:
+                        asyncio.run_coroutine_threadsafe(msg.edit_text(f"جاري التحميل: {p}%"), bot.session.loop)
                 except: pass
 
         opts = {
@@ -151,21 +145,16 @@ async def link_download_handler(message: types.Message):
                     for entry in entries:
                         if entry is None: continue
                         full_path = ydl.prepare_filename(entry)
-                        if not os.path.exists(full_path):
-                            actual_ext = entry.get('ext', '')
-                            base_path = os.path.splitext(full_path)[0]
-                            full_path = f"{base_path}.{actual_ext}"
-                            
                         if os.path.exists(full_path):
                             uploader = clean_name(entry.get('uploader', 'unknown'))
                             rnd = ''.join(random.choices(string.digits, k=9))
-                            detected_ext = os.path.splitext(full_path)[1].lstrip('.')
+                            raw_ext = entry.get('ext', 'file')
                             
                             if is_arabic(uploader):
-                                filename = f"{rnd}.{detected_ext}"
+                                filename = f"{rnd}.{raw_ext}"
                             else:
                                 formatted_up = format_uploader(uploader)
-                                filename = f"{formatted_up} - {rnd}.{detected_ext}"
+                                filename = f"{formatted_up} - {rnd}.{raw_ext}"
                                 
                             current_batch.append((full_path, filename))
                             if len(current_batch) == 8:
@@ -174,9 +163,6 @@ async def link_download_handler(message: types.Message):
                     if current_batch:
                         file_batches.append(current_batch)
                         
-                    await bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
-                    await bot.delete_message(chat_id=message.chat.id, message_id=progress_msg.message_id)
-                    
                     for b_idx, batch in enumerate(file_batches):
                         media_group = []
                         for full_path, filename in batch:
@@ -184,39 +170,32 @@ async def link_download_handler(message: types.Message):
                                 file_data = f.read()
                             media_group.append(types.InputMediaDocument(media=BufferedInputFile(file_data, filename=filename)))
                         
-                        await message.reply_media_group(media=media_group)
+                        if b_idx == 0:
+                            await bot.delete_message(chat_id=message.chat.id, message_id=msg.message_id)
+                            await message.reply_media_group(media=media_group)
+                        else:
+                            await message.reply_media_group(media=media_group)
                             
                         for full_path, _ in batch:
                             cAshe.clear_system_file(full_path)
                     await message.reply("يدلل بعد كسي\nترى اموت بيك اعشقك هايمه بعيرك", reply_markup=kb)
                 else:
                     full_path = ydl.prepare_filename(info)
-                    if not os.path.exists(full_path):
-                        actual_ext = info.get('ext', '')
-                        base_path = os.path.splitext(full_path)[0]
-                        full_path = f"{base_path}.{actual_ext}"
-                        
                     uploader = clean_name(info.get('uploader', 'unknown'))
                     rnd = ''.join(random.choices(string.digits, k=9))
-                    detected_ext = os.path.splitext(full_path)[1].lstrip('.')
+                    raw_ext = info.get('ext', 'file')
                     
                     if is_arabic(uploader):
-                        filename = f"{rnd}.{detected_ext}"
+                        filename = f"{rnd}.{raw_ext}"
                     else:
                         formatted_up = format_uploader(uploader)
-                        filename = f"{formatted_up} - {rnd}.{detected_ext}"
+                        filename = f"{formatted_up} - {rnd}.{raw_ext}"
                     
                     with open(full_path, 'rb') as f:
                         file_data = f.read()
                     
-                    await bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
-                    
-                    sent_doc = await bot.edit_message_media(
-                        chat_id=message.chat.id,
-                        message_id=progress_msg.message_id,
-                        media=types.InputMediaDocument(media=BufferedInputFile(file_data, filename=filename)),
-                        reply_markup=kb
-                    )
+                    await bot.delete_message(chat_id=message.chat.id, message_id=msg.message_id)
+                    sent_doc = await message.reply_document(BufferedInputFile(file_data, filename=filename), reply_markup=kb)
                     await message.reply("يدلل بعد كسي\nترى اموت بيك اعشقك هايمه بعيرك", reply_markup=kb)
                     
                     if sent_doc.document:
@@ -224,10 +203,7 @@ async def link_download_handler(message: types.Message):
                         
                     cAshe.clear_system_file(full_path)
         except Exception:
-            try:
-                await progress_msg.edit_text("الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي")
-            except:
-                pass
+            await msg.edit_text("الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي")
 
     await user_queues[user_id].put(task)
     if user_queues[user_id].qsize() == 1:

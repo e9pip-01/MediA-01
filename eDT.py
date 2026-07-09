@@ -13,17 +13,17 @@ def get_public_button():
         else:
             clean_user = public_link.lstrip("@")
             url_target = f"https://t.me/{clean_user}"
-        return InlineKeyboardButton(text="الاشتراك العلني", url=url_target)
+        return InlineKeyboardButton(text="الاشتراك العلني", url=url_target, style="primary")
     else:
-        return InlineKeyboardButton(text="تواصل مع المطور", url="tg://user?id=8597653867")
+        return InlineKeyboardButton(text="تواصل مع المطور", url="tg://user?id=8597653867", style="primary")
 
 async def handle_edt_command(message: types.Message):
     if message.chat.type != "private":
         return
         
-    btn_set = InlineKeyboardButton(text="تعيين الرابط", switch_inline_query_current_chat="تعيين الرابط")
-    btn_show = InlineKeyboardButton(text="عرض الاشتراك العلني", switch_inline_query_current_chat="عرض الاشتراك العلني")
-    btn_del = InlineKeyboardButton(text="مسح", callback_data="del_edt")
+    btn_set = InlineKeyboardButton(text="تعيين الرابط", switch_inline_query_current_chat="تعيين الرابط", style="success")
+    btn_show = InlineKeyboardButton(text="عرض الاشتراك العلني", switch_inline_query_current_chat="عرض الاشتراك العلني", style="primary")
+    btn_del = InlineKeyboardButton(text="مسح", callback_data="del_edt", style="danger")
     
     kb = InlineKeyboardMarkup(inline_keyboard=[[btn_set], [btn_show], [btn_del]])
     await message.reply("تريد عرض الاشتراك العلني دوس زر\nعرض الاشتراك العلني\n\nهم لو تريد تعين رابط الزر دوس ع زر تعيين الرابط", reply_markup=kb)
