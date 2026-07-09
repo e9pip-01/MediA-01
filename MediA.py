@@ -56,28 +56,6 @@ def generate_smart_filename(uploader: str) -> str:
 async def process_download_task(message: types.Message, url_text: str, bot: Bot, animate_func, trigger_reaction_func):
     asyncio.create_task(trigger_reaction_func(bot, message.chat.id, message.message_id))
     
-    cached_ids = await dATAbAse.get_cached_file_ids(url_text)
-    if cached_ids:
-        try:
-            chunks = [cached_ids[i:i + 8] for i in range(0, len(cached_ids), 8)]
-            for chunk in chunks:
-                media_group = []
-                for fid in chunk:
-                    media_group.append(types.InputMediaDocument(media=fid))
-                
-                if len(media_group) == 1:
-                    sent = await message.reply_document(media_group[0].media)
-                    asyncio.create_task(trigger_reaction_func(bot, sent.chat.id, sent.message_id))
-                else:
-                    sent_group = await message.reply_media_group(media=media_group)
-                    if sent_group:
-                        asyncio.create_task(trigger_reaction_func(bot, sent_group[0].chat.id, sent_group[0].message_id))
-
-            await animate_func(message, STriNGs.SUCCESS_MESSAGE)
-            return
-        except Exception:
-            pass
-
     cleanup_stale_files()
     
     progress_text_msg = await animate_func(message, STriNGs.PROGRESS_START)
@@ -103,7 +81,7 @@ async def process_download_task(message: types.Message, url_text: str, bot: Bot,
                     )
 
     ydl_opts = {
-        'format': 'best',
+        'format': 'bestvideo+bestaudio/best',
         'progress_hooks': [ytdl_hook],
         'quiet': True,
         'no_warnings': True,
@@ -125,7 +103,7 @@ async def process_download_task(message: types.Message, url_text: str, bot: Bot,
         for entry in entries:
             custom_name = generate_smart_filename(uploader)
             entry_opts = {
-                'format': 'best',
+                'format': 'bestvideo+bestaudio/best',
                 'outtmpl': f'downloads/{custom_name}.%(ext)s',
                 'quiet': True,
                 'no_warnings': True
@@ -143,7 +121,6 @@ async def process_download_task(message: types.Message, url_text: str, bot: Bot,
         
         if downloaded_files:
             chunks = [downloaded_files[i:i + 8] for i in range(0, len(downloaded_files), 8)]
-            uploaded_file_ids = []
             
             for chunk in chunks:
                 media_group = []
@@ -153,19 +130,12 @@ async def process_download_task(message: types.Message, url_text: str, bot: Bot,
                 
                 if len(media_group) == 1:
                     sent_doc = await message.reply_document(media_group[0].media)
-                    uploaded_file_ids.append(sent_doc.document.file_id)
                     asyncio.create_task(trigger_reaction_func(bot, sent_doc.chat.id, sent_doc.message_id))
                 else:
                     sent_group = await message.reply_media_group(media=media_group)
                     if sent_group:
                         asyncio.create_task(trigger_reaction_func(bot, sent_group[0].chat.id, sent_group[0].message_id))
-                    for sent_msg in sent_group:
-                        if sent_msg.document:
-                            uploaded_file_ids.append(sent_msg.document.file_id)
             
-            if uploaded_file_ids:
-                await dATAbAse.save_cached_file_ids(url_text, uploaded_file_ids)
-                
             await animate_func(message, STriNGs.SUCCESS_MESSAGE)
         else:
             await animate_func(message, STriNGs.FILE_NOT_FOUND)

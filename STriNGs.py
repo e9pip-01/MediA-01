@@ -53,7 +53,7 @@ def get_keyboard_markup(invoker_id: int):
     return types.InlineKeyboardMarkup(inline_keyboard=kb)
 
 def get_bot_edit_keyboard():
-    kb = [
+    keyboard = [
         [types.KeyboardButton(text=BTN_SET_LINK), types.KeyboardButton(text=BTN_SHOW_MSG)],
         [types.KeyboardButton(text="الغاء")]
     ]
