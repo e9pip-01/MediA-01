@@ -122,12 +122,12 @@ async def process_whisper_command(message: types.Message, bot: Bot, trigger_dela
 
     asyncio.create_task(trigger_delayed_reaction(bot, message.chat.id, message.message_id))
     
-    secret_key = f"whsp_{sender_id}_{target_id}_{message.message_id}"
+    secret_key = f"whsp_{sender_id}_{target_id}_{message.message_id}_{message.chat.id}"
     
     kb = [[types.InlineKeyboardButton(text="اهمس", callback_data=secret_key, style="primary")]]
     markup = types.InlineKeyboardMarkup(inline_keyboard=kb)
     
-    sent = await message.reply("اضغط على زر اهمس واكتب همستك\nبشات البوت", reply_markup=markup)
+    sent = await message.reply("اضغط على زر اهمس واكتب همستك\nبشات البوت", reply_markup=markup, protect_content=True)
     asyncio.create_task(trigger_delayed_reaction(bot, sent.chat.id, sent.message_id))
     asyncio.create_task(safe_send_food_emoji(message.chat.id, message.message_id))
 
@@ -149,7 +149,7 @@ async def handle_whisper_click(callback: types.CallbackQuery, bot: Bot):
     await callback.answer(url, show_alert=True)
 
 @order_router.callback_query(F.data.startswith("showwhsp_"))
-async def show_whisper_content(callback: types.CallbackQuery):
+async def show_whisper_content(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
     parts = callback.data.split("_")
     target_id = int(parts[2])
@@ -159,8 +159,28 @@ async def show_whisper_content(callback: types.CallbackQuery):
         await callback.answer("الهمسة مو الك/ج ءتدعبل/ي\nعزيزي", show_alert=True)
         return
 
-    content = whisper_data.get(session_key, "تم انتهاء صلاحية الهمسة أو حذفها.")
+    if session_key not in whisper_data:
+        await callback.answer("تم انتهاء صلاحية الهمسة أو حذفها.", show_alert=True)
+        return
+
+    data = whisper_data[session_key]
+    data["read_count"] += 1
+    content = data["text"]
+    sender_id = data["sender_id"]
+
     await callback.answer(content, show_alert=True)
+
+    if data["read_count"] >= 3:
+        del whisper_data[session_key]
+        
+        sender_link = f"tg://user?id={sender_id}"
+        sender_markdown = f"<a href='{sender_link}'>فلان</a>"
+        updated_text = f"قُرءت الهمسة عزيزي #¹ {sender_markdown}\nاتمنى تهمس بدون قلة ادب"
+        
+        try:
+            await callback.message.edit_text(updated_text, reply_markup=None, parse_mode="HTML")
+        except Exception:
+            pass
 
 async def handle_start_whisper_session(message: types.Message, payload: str, bot: Bot, trigger_delayed_reaction, safe_send_food_emoji):
     user_id = message.from_user.id
@@ -168,11 +188,12 @@ async def handle_start_whisper_session(message: types.Message, payload: str, bot
     sender_id = int(parts[1])
     target_id = int(parts[2])
     orig_msg_id = int(parts[3])
+    source_chat_id = parts[4] if len(parts) > 4 else None
 
     if user_id != sender_id:
         return
 
-    sent_ask = await message.reply("اكتب همستك وراح يتم ارسالها للمقصود\nارسالها له")
+    sent_ask = await message.reply("اكتب همستك وراح يتم ارسالها للمقصود\nارسالها له", protect_content=True)
     asyncio.create_task(trigger_delayed_reaction(bot, sent_ask.chat.id, sent_ask.message_id))
     
     session_key = f"{sender_id}_{target_id}_{orig_msg_id}"
@@ -180,7 +201,7 @@ async def handle_start_whisper_session(message: types.Message, payload: str, bot
         "session_key": session_key,
         "target_id": target_id,
         "orig_msg_id": orig_msg_id,
-        "chat_id": parts[4] if len(parts) > 4 else None
+        "chat_id": source_chat_id
     }
     
     asyncio.create_task(whisper_timeout_task(user_id))
@@ -199,13 +220,18 @@ async def process_whisper_input(message: types.Message, bot: Bot, trigger_delaye
     session_key = session["session_key"]
     target_id = session["target_id"]
     orig_msg_id = session["orig_msg_id"]
+    source_chat_id = session["chat_id"]
     
     whisper_text = message.text
-    whisper_data[session_key] = whisper_text
+    whisper_data[session_key] = {
+        "text": whisper_text,
+        "read_count": 0,
+        "sender_id": user_id
+    }
     
     del active_whisper_sessions[user_id]
     
-    sender_link = f"t.me/user?id={user_id}"
+    sender_link = f"tg://user?id={user_id}"
     if message.from_user.username:
         sender_link = f"https://t.me/{message.from_user.username}"
         
@@ -216,18 +242,32 @@ async def process_whisper_input(message: types.Message, bot: Bot, trigger_delaye
     kb = [[types.InlineKeyboardButton(text="هاي همستك/ج", callback_data=f"showwhsp_{session_key}", style="danger")]]
     markup = types.InlineKeyboardMarkup(inline_keyboard=kb)
     
+    target_destination = source_chat_id if source_chat_id else target_id
+
     try:
         sent_whisper = await bot.send_message(
-            chat_id=target_id,
+            chat_id=target_destination,
             text=text_to_send,
             reply_markup=markup,
-            parse_mode="HTML"
+            reply_to_message_id=orig_msg_id if source_chat_id else None,
+            parse_mode="HTML",
+            protect_content=True
         )
         asyncio.create_task(trigger_delayed_reaction(bot, sent_whisper.chat.id, sent_whisper.message_id))
     except Exception:
-        pass
+        try:
+            sent_whisper = await bot.send_message(
+                chat_id=target_id,
+                text=text_to_send,
+                reply_markup=markup,
+                parse_mode="HTML",
+                protect_content=True
+            )
+            asyncio.create_task(trigger_delayed_reaction(bot, sent_whisper.chat.id, sent_whisper.message_id))
+        except Exception:
+            pass
 
-    sent_done = await message.reply("تم إرسال الهمسة انطيني امص زبك\nودلل/ي يبعَدي")
+    sent_done = await message.reply("تم إرسال الهمسة انطيني امص زبك\nودلل/ي يبعَدي", protect_content=True)
     asyncio.create_task(trigger_delayed_reaction(bot, sent_done.chat.id, sent_done.message_id))
     asyncio.create_task(safe_send_food_emoji(message.chat.id, message.message_id))
     return True
