@@ -121,7 +121,7 @@ async def get_next_emoji_index() -> int:
             if row:
                 current = row[0]
                 next_idx = (current + 1) % 7
-                await db.execute("UPDATE global_state WHERE key = 'emoji_idx'", (next_idx,))
+                await db.execute("UPDATE global_state SET val = ? WHERE key = 'emoji_idx'", (next_idx,))
                 await db.commit()
                 return current
             else:

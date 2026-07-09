@@ -72,42 +72,50 @@ async def animate_text(message: types.Message, text: str, reply_markup: types.In
     asyncio.create_task(trigger_delayed_reaction(bot, message.chat.id, message.message_id))
 
     lines = text.split('\n')
-    line_word_lists = [line.split() for line in lines]
     
     line_indices = [0] * len(lines)
     line_toggles = [True] * len(lines)
+    line_active = [False] * len(lines)
     
-    first_display_lines = []
-    for idx, words in enumerate(line_word_lists):
-        take = min(4, len(words))
-        first_display_lines.append(" ".join(words[:take]))
-        line_indices[idx] = take
-        line_toggles[idx] = False
-        
-    sent_msg = await message.reply("\n".join(first_display_lines))
+    if lines:
+        line_active[0] = True
+
+    first_chunk = lines[0][0:7]
+    line_indices[0] = 7
+    line_toggles[0] = False
+    
+    sent_msg = await message.reply(first_chunk)
     asyncio.create_task(trigger_delayed_reaction(bot, sent_msg.chat.id, sent_msg.message_id))
     await asyncio.sleep(0.3)
 
     while True:
         all_done = True
         for idx in range(len(lines)):
-            if line_indices[idx] < len(line_word_lists[idx]):
+            if line_indices[idx] < len(lines[idx]):
                 all_done = False
                 break
         if all_done:
             break
 
         current_display_lines = []
+        
         for idx in range(len(lines)):
-            words = line_word_lists[idx]
-            if line_indices[idx] < len(words):
-                take = 4 if line_toggles[idx] else 3
+            full_line = lines[idx]
+            
+            if line_active[idx] and line_indices[idx] < len(full_line):
+                take = 7 if line_toggles[idx] else 6
                 line_toggles[idx] = not line_toggles[idx]
                 line_indices[idx] += take
                 
-            current_display_lines.append(" ".join(words[:line_indices[idx]]))
+                if idx + 1 < len(lines) and not line_active[idx + 1]:
+                    line_active[idx + 1] = True
+
+            current_line_text = full_line[:line_indices[idx]]
+            if current_line_text or idx < len(lines) - 1:
+                current_display_lines.append(current_line_text)
 
         full_current_text = "\n".join(current_display_lines)
+        
         try:
             await sent_msg.edit_text(full_current_text)
             await asyncio.sleep(0.3)
@@ -135,7 +143,7 @@ def cleanup_stale_files():
     for filename in os.listdir(downloads_dir):
         file_path = os.path.join(downloads_dir, filename)
         if os.path.isfile(file_path):
-            if now - os.path.getmtime(file_path) > 600:
+            if now - os.path.getmtime(file_path) > 3600:
                 try:
                     os.remove(file_path)
                 except Exception:
@@ -144,8 +152,10 @@ def cleanup_stale_files():
 def clean_filename_part(text: str) -> str:
     if not text:
         return ""
+    
     cleaned = re.sub(r'[^a-zA-Zа-яА-Я0-9\s\-&]', '', text)
     cleaned = ' '.join(cleaned.split())
+    
     result = []
     for char in cleaned:
         if char.isalpha():
@@ -157,12 +167,14 @@ def clean_filename_part(text: str) -> str:
                 result.append(char.lower())
         else:
             result.append(char)
+            
     return "".join(result).strip()
 
 def generate_smart_filename(uploader: str) -> str:
     clean_uploader = clean_filename_part(uploader)
     if not clean_uploader:
         clean_uploader = "ANoNyMoUs"
+        
     random_digits = "".join(random.choices(string.digits, k=9))
     return f"{clean_uploader} - {random_digits}"
 
@@ -234,6 +246,7 @@ async def process_download_task(message: types.Message, url_text: str):
                 media_group = []
                 for fid in chunk:
                     media_group.append(types.InputMediaDocument(media=fid))
+                
                 if len(media_group) == 1:
                     sent = await message.reply_document(media_group[0].media)
                     asyncio.create_task(trigger_delayed_reaction(bot, sent.chat.id, sent.message_id))
@@ -241,6 +254,7 @@ async def process_download_task(message: types.Message, url_text: str):
                     sent_group = await message.reply_media_group(media=media_group)
                     if sent_group:
                         asyncio.create_task(trigger_delayed_reaction(bot, sent_group[0].chat.id, sent_group[0].message_id))
+
             sent_succ = await message.reply(STriNGs.SUCCESS_MESSAGE)
             asyncio.create_task(trigger_delayed_reaction(bot, sent_succ.chat.id, sent_succ.message_id))
             asyncio.create_task(safe_send_food_emoji(message.chat.id, message.message_id))
@@ -255,6 +269,7 @@ async def process_download_task(message: types.Message, url_text: str):
     percent_msg = None
     last_reported_progress = 0
     downloaded_files = []
+    
     loop = asyncio.get_running_loop()
 
     def ytdl_hook(d):
@@ -285,9 +300,11 @@ async def process_download_task(message: types.Message, url_text: str):
         'no_warnings': True,
         'extract_flat': False
     }
+    
     try:
         ydl = YoutubeDL(ydl_opts)
         info = await loop.run_in_executor(None, lambda: ydl.extract_info(url_text, download=False))
+        
         uploader = info.get('uploader') or info.get('channel') or "ANoNyMoUs"
         
         entries = []
@@ -313,6 +330,7 @@ async def process_download_task(message: types.Message, url_text: str):
             await progress_msg.delete()
         except Exception:
             pass
+            
         try:
             if percent_msg:
                 await percent_msg.delete()
@@ -322,11 +340,13 @@ async def process_download_task(message: types.Message, url_text: str):
         if downloaded_files:
             chunks = [downloaded_files[i:i + 8] for i in range(0, len(downloaded_files), 8)]
             uploaded_file_ids = []
+            
             for chunk in chunks:
                 media_group = []
                 for filepath in chunk:
                     file_input = types.FSInputFile(filepath)
                     media_group.append(types.InputMediaDocument(media=file_input))
+                
                 if len(media_group) == 1:
                     sent_doc = await message.reply_document(media_group[0].media)
                     uploaded_file_ids.append(sent_doc.document.file_id)
@@ -338,8 +358,10 @@ async def process_download_task(message: types.Message, url_text: str):
                     for sent_msg in sent_group:
                         if sent_msg.document:
                             uploaded_file_ids.append(sent_msg.document.file_id)
+            
             if uploaded_file_ids:
                 await dATAbAse.save_cached_file_ids(url_text, uploaded_file_ids)
+                
             sent_final = await message.reply(STriNGs.SUCCESS_MESSAGE)
             asyncio.create_task(trigger_delayed_reaction(bot, sent_final.chat.id, sent_final.message_id))
             asyncio.create_task(safe_send_food_emoji(message.chat.id, message.message_id))
@@ -347,6 +369,7 @@ async def process_download_task(message: types.Message, url_text: str):
             sent_err = await message.reply(STriNGs.FILE_NOT_FOUND)
             asyncio.create_task(trigger_delayed_reaction(bot, sent_err.chat.id, sent_err.message_id))
             asyncio.create_task(safe_send_food_emoji(message.chat.id, message.message_id))
+            
     except Exception:
         try:
             await progress_msg.delete()
@@ -357,8 +380,9 @@ async def process_download_task(message: types.Message, url_text: str):
                 await percent_msg.delete()
         except Exception:
             pass
+            
         try:
-            await message.reply(STriNGs.ERROR_MESSAGE)
+            sent_err_msg = await message.reply(STriNGs.ERROR_MESSAGE)
             asyncio.create_task(safe_send_food_emoji(message.chat.id, message.message_id))
         except Exception:
             pass
@@ -394,10 +418,12 @@ async def handle_service_messages(message: types.Message):
 @dp.channel_post(F.text)
 async def handle_message(message: types.Message):
     asyncio.create_task(trigger_delayed_reaction(bot, message.chat.id, message.message_id))
+    
     text = message.text.strip()
     user_id = message.from_user.id if message.from_user else message.chat.id
     chat_id = message.chat.id
     chat_type = message.chat.type
+    
     is_group_or_channel = chat_type in [ChatType.GROUP, ChatType.SUPERGROUP, ChatType.CHANNEL]
 
     if text.lower().startswith("يوت ") and len(text) > 4:
@@ -410,6 +436,7 @@ async def handle_message(message: types.Message):
     if current_admin_state == "wait_link" and await STriNGs.is_user_allowed_for_edit(message):
         is_link_input = text.startswith("http://") or text.startswith("https://") or "t.me/" in text
         is_user_input = text.startswith("@") or validate_custom_username(text)
+        
         if is_link_input or is_user_input:
             await dATAbAse.set_force_sub_link(text)
             await dATAbAse.set_admin_state(user_id, "none")
@@ -506,6 +533,7 @@ async def handle_message(message: types.Message):
 
     has_english = bool(re.search(r'[a-zA-Z]', text))
     has_russian = bool(re.search(r'[а-яА-ЯёЁ]', text))
+    
     if (has_english or has_russian) and not (validate_custom_username(text) and not text.startswith("@")):
         processed_text = process_custom_languages(text)
         sent_custom = await message.reply(processed_text)
@@ -541,8 +569,15 @@ async def main():
     if not os.path.exists('downloads'):
         os.makedirs('downloads')
     await on_startup()
+    
     dp.include_router(order_router)
     dp.include_router(yoT_router)
+    
+    dp.callback_query.register(
+        lambda cb: handle_inline_buttons(cb, bot, trigger_delayed_reaction, safe_send_food_emoji, handle_message),
+        F.data.startswith("btn_")
+    )
+    
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
