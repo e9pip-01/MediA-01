@@ -1,5 +1,7 @@
 aiogram
+aiosqlite
 yt-dlp
 aiohttp
-aiosqlite
-ffmpeg
+aiodns
+cchardet
+uvloop
