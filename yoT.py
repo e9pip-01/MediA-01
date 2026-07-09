@@ -8,6 +8,7 @@ from aiogram import types
 from aiogram.types import BufferedInputFile, InlineKeyboardMarkup
 import cAshe
 import eDT
+import bUTToNs
 
 def is_arabic(text):
     return any('\u0600' <= char <= '\u06FF' for char in text)
