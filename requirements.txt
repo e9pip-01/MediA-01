@@ -1,6 +1,6 @@
 aiogram
-aiosqlite
-yt-dlp
-aiohttp
-aiodns
+python-chess
+cairosvg
 uvloop
+ujson
+aiodns
