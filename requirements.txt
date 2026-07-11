@@ -1,6 +1,5 @@
-aiogram
+python-telegram-bot
 python-chess
 cairosvg
-uvloop
-ujson
-aiodns
+stockfish
+aiohttp
