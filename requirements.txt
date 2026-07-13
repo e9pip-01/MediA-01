@@ -3,7 +3,7 @@ yt-dlp
 googletrans
 aiodns
 pycares
-cchardet
+faust-cchardet
 httpx
 orjson
 brotli
