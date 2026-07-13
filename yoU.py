@@ -4,7 +4,7 @@ import random
 import re
 import yt_dlp
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaAudio, FSInputFile
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from googletrans import Translator
@@ -40,7 +40,7 @@ class BotStates(StatesGroup):
     waiting_for_sticker_caption = State()
     waiting_for_more_decision = State()
 
-class DownloadJob:
+class DownloadJob():
     def __init__(self, message: Message, query: str):
         self.message = message
         self.query = query
@@ -197,13 +197,20 @@ async def register_edit_panel(chat_id: int, panel_msg_id: int, user_msg_id: int)
             await bot.delete_message(chat_id, old_panel_id)
         except:
             pass
+        try:
+            await bot.delete_message(chat_id, old_user_id)
+        except:
+            pass
 
 def get_main_reply_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="رد متعدد بالستيكرات", callback_data="add_reply_sticker")],
-        [InlineKeyboardButton(text="رد متعدد بالنصوص", callback_data="add_reply_text")],
-        [InlineKeyboardButton(text="المهلة الزمنية", callback_data="delay_settings"), InlineKeyboardButton(text="عرض الردود", callback_data="view_replies")],
-        [InlineKeyboardButton(text="مسح", callback_data="clear_panel")]
+        [InlineKeyboardButton(text="رد متعدد بالستيكرات", callback_data="add_reply_sticker", style="primary")],
+        [InlineKeyboardButton(text="رد متعدد بالنصوص", callback_data="add_reply_text", style="primary")],
+        [
+            InlineKeyboardButton(text="المهلة الزمنية", callback_data="delay_settings", style="primary"), 
+            InlineKeyboardButton(text="عرض الردود", callback_data="view_replies", style="primary")
+        ],
+        [InlineKeyboardButton(text="مسح", callback_data="clear_panel", style="destructive")]
     ])
 
 @dp.message(F.text.in_({"رد", "اضف رد"}))
@@ -220,7 +227,7 @@ async def add_reply_command(message: Message, state: FSMContext):
             "هيج >< اذا تريد الرد ممنوع يبوكونه البواكين ضيف بهاي\n"
             "الصيغه هذا بعد الرمز ضيف / ثم ^ مثال هلو <> / ^\n"
             "او هلو >< / ^",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="الغاء", callback_data="cancel_silent")]])
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="الغاء", callback_data="cancel_silent", style="destructive")]])
         )
         await state.set_state(BotStates.waiting_for_trigger)
         return
@@ -292,7 +299,7 @@ async def add_reply_sticker_btn(query: CallbackQuery, state: FSMContext):
     await state.update_data(mode="sticker", sub_mode="awaiting_trigger")
     await query.message.edit_text(
         "¹# - ضيف الرد المتعدد يدعم الستيكرات\nبالكابشن وبدون كابشن",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="الغاء", callback_data="cancel_silent")]])
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="الغاء", callback_data="cancel_silent", style="destructive")]])
     )
     await state.set_state(BotStates.waiting_for_trigger)
 
@@ -301,7 +308,7 @@ async def add_reply_text_btn(query: CallbackQuery, state: FSMContext):
     await state.update_data(mode="text", sub_mode="awaiting_trigger")
     await query.message.edit_text(
         "¹# - ضيف الرد المتعدد يدعم الستيكرات\nبالكابشن وبدون كابشن",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="الغاء", callback_data="cancel_silent")]])
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="الغاء", callback_data="cancel_silent", style="destructive")]])
     )
     await state.set_state(BotStates.waiting_for_trigger)
 
@@ -340,7 +347,7 @@ async def process_reply_content(message: Message, state: FSMContext):
         sticker_file_id = message.sticker.file_id
         await state.update_data(current_sticker=sticker_file_id)
         
-        buttons = [[InlineKeyboardButton(text="اضف كابشن", callback_data="add_caption_active")]]
+        buttons = [[InlineKeyboardButton(text="اضف كابشن", callback_data="add_caption_active", style="primary")]]
         await message.reply_sticker(sticker_file_id, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
         return
         
@@ -350,7 +357,10 @@ async def process_reply_content(message: Message, state: FSMContext):
         await state.update_data(pool=pool)
         
         buttons = [
-            [InlineKeyboardButton(text="نعم", callback_data="more_yes"), InlineKeyboardButton(text="لا", callback_data="more_no")]
+            [
+                InlineKeyboardButton(text="نعم", callback_data="more_yes", style="primary"), 
+                InlineKeyboardButton(text="لا", callback_data="more_no", style="destructive")
+            ]
         ]
         await message.reply("¹# - هل تود اضافة المزيد من الردود لهذا الرد\nانقر على زر نعم او لا", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
         await state.set_state(BotStates.waiting_for_more_decision)
@@ -358,7 +368,7 @@ async def process_reply_content(message: Message, state: FSMContext):
 @dp.callback_query(F.data == "add_caption_active")
 async def add_caption_active_callback(query: CallbackQuery, state: FSMContext):
     await query.message.edit_reply_markup(
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="اضف كابشن", callback_data="add_caption_active")]])
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="اضف كابشن", callback_data="add_caption_active", style="primary")]])
     )
     await state.set_state(BotStates.waiting_for_sticker_caption)
 
@@ -376,7 +386,10 @@ async def process_sticker_caption(message: Message, state: FSMContext):
         await state.update_data(pool=pool, current_sticker=None)
         
     buttons = [
-        [InlineKeyboardButton(text="نعم", callback_data="more_yes"), InlineKeyboardButton(text="لا", callback_data="more_no")]
+        [
+            InlineKeyboardButton(text="نعم", callback_data="more_yes", style="primary"), 
+            InlineKeyboardButton(text="لا", callback_data="more_no", style="destructive")
+        ]
     ]
     await message.reply("¹# - هل تود اضافة المزيد من الردود لهذا الرد\nانقر على زر نعم او لا", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await state.set_state(BotStates.waiting_for_more_decision)
@@ -385,14 +398,17 @@ async def process_sticker_caption(message: Message, state: FSMContext):
 async def more_yes_callback(query: CallbackQuery, state: FSMContext):
     await query.message.edit_text(
         "¹# - اضف الرد اللذي تريده ان يدعم\nهذا الرد ايضا",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="عودة", callback_data="more_back")]])
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="عودة", callback_data="more_back", style="secondary")]])
     )
     await state.set_state(BotStates.waiting_for_reply_content)
 
 @dp.callback_query(F.data == "more_back")
 async def more_back_callback(query: CallbackQuery, state: FSMContext):
     buttons = [
-        [InlineKeyboardButton(text="نعم", callback_data="more_yes"), InlineKeyboardButton(text="لا", callback_data="more_no")]
+        [
+            InlineKeyboardButton(text="نعم", callback_data="more_yes", style="primary"), 
+            InlineKeyboardButton(text="لا", callback_data="more_no", style="destructive")
+        ]
     ]
     await query.message.edit_text("¹# - هل تود اضافة المزيد من الردود لهذا الرد\nانقر على زر نعم او لا", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await state.set_state(BotStates.waiting_for_more_decision)
@@ -435,10 +451,11 @@ async def delay_settings_callback(query: CallbackQuery):
         row_buttons = []
         for val in row:
             is_active = (float(val) == current_delay)
-            keyboard_buttons.append(InlineKeyboardButton(text=val, callback_data=f"set_delay_{val}"))
+            style = "primary" if is_active else "secondary"
+            row_buttons.append(InlineKeyboardButton(text=val, callback_data=f"set_delay_{val}", style=style))
         keyboard_buttons.append(row_buttons)
         
-    keyboard_buttons.append([InlineKeyboardButton(text="عودة", callback_data="back_to_main")])
+    keyboard_buttons.append([InlineKeyboardButton(text="عودة", callback_data="back_to_main", style="secondary")])
     
     await query.message.edit_text(
         "المهلة الزمنية الفاصلة بين كل رسالة ورسالة\nمن الردود اللتي سيرسلها البوت",
@@ -463,10 +480,11 @@ async def set_delay_val_callback(query: CallbackQuery):
         row_buttons = []
         for val in row:
             is_active = (float(val) == new_delay)
-            keyboard_buttons.append(InlineKeyboardButton(text=val, callback_data=f"set_delay_{val}"))
+            style = "primary" if is_active else "secondary"
+            row_buttons.append(InlineKeyboardButton(text=val, callback_data=f"set_delay_{val}", style=style))
         keyboard_buttons.append(row_buttons)
         
-    keyboard_buttons.append([InlineKeyboardButton(text="عودة", callback_data="back_to_main")])
+    keyboard_buttons.append([InlineKeyboardButton(text="عودة", callback_data="back_to_main", style="secondary")])
     
     try:
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons))
@@ -497,7 +515,7 @@ async def view_replies_callback(query: CallbackQuery):
         
     await query.message.edit_text(
         "\n%\n".join(text_lines),
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="عودة", callback_data="back_to_main")]])
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="عودة", callback_data="back_to_main", style="secondary")]])
     )
 
 @dp.callback_query(F.data == "back_to_main")
@@ -553,11 +571,17 @@ async def execute_download(job: DownloadJob):
         
         if url in file_cache:
             try:
-                await pct_msg.delete()
+                await pct_msg.edit_media(
+                    media=InputMediaAudio(media=file_cache[url]),
+                    reply_markup=get_dynamic_developer_button()
+                )
             except:
                 pass
-            sent_cache = await job.message.reply_audio(file_cache[url], reply_markup=get_dynamic_developer_button())
-            asyncio.create_task(trigger_random_reaction(job.message.chat.id, sent_cache.message_id, sent_cache))
+            try:
+                await msg.edit_text("اكتمل اليوت وتم ارفق اغنيتك بالشات\nماعليك سوى الاستماع لها", reply_markup=get_dynamic_developer_button())
+            except:
+                pass
+            asyncio.create_task(trigger_random_reaction(job.message.chat.id, pct_msg.message_id, pct_msg))
             return
         
         ydl_down_opts = {
@@ -570,11 +594,6 @@ async def execute_download(job: DownloadJob):
         with yt_dlp.YoutubeDL(ydl_down_opts) as ydl:
             ydl.download([url])
             filename = [f for f in os.listdir() if f.startswith("temp_")][0]
-        
-        try:
-            await pct_msg.delete()
-        except:
-            pass
             
         title_clean = re.sub(r'[^a-zA-Z0-9\s-&]', '', title)
         channel_clean = channel
@@ -588,24 +607,34 @@ async def execute_download(job: DownloadJob):
 
         final_name = f"{channel_clean} - {title_clean}"
         
-        from aiogram.types import FSInputFile
         audio_file = FSInputFile(filename, filename=final_name)
-        sent = await job.message.reply_audio(audio_file, title=final_name, reply_markup=get_dynamic_developer_button())
-        file_cache[url] = sent.audio.file_id
+        
+        try:
+            edited_msg = await pct_msg.edit_media(
+                media=InputMediaAudio(media=audio_file, title=final_name),
+                reply_markup=get_dynamic_developer_button()
+            )
+            file_cache[url] = edited_msg.audio.file_id
+        except:
+            pass
+            
+        try:
+            await msg.edit_text("اكتمل اليوت وتم ارفق اغنيتك بالشات\nماعليك سوى الاستماع لها", reply_markup=get_dynamic_developer_button())
+        except:
+            pass
         
         if os.path.exists(filename):
             os.remove(filename)
         user_settings.clear()
         
-        asyncio.create_task(trigger_random_reaction(job.message.chat.id, sent.message_id, sent))
+        asyncio.create_task(trigger_random_reaction(job.message.chat.id, pct_msg.message_id, pct_msg))
         
     except:
         try:
-            await pct_msg.delete()
+            await pct_msg.edit_text("الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي", reply_markup=get_dynamic_developer_button())
         except:
             pass
-        err_msg = await msg.edit_text("الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي", reply_markup=get_dynamic_developer_button())
-        asyncio.create_task(trigger_random_reaction(job.message.chat.id, err_msg.message_id, err_msg))
+        asyncio.create_task(trigger_random_reaction(job.message.chat.id, pct_msg.message_id, pct_msg))
         for f in os.listdir():
             if f.startswith("temp_"):
                 try: os.remove(f)
