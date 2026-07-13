@@ -31,6 +31,7 @@ last_reactions = []
 chat_replies = {}
 chat_delays = {}
 chat_control_panels = {}
+edit_panels_history = {}
 
 class BotStates(StatesGroup):
     waiting_for_lang_input = State()
@@ -44,6 +45,7 @@ class DownloadJob:
         self.message = message
         self.query = query
         self.msg_to_edit = None
+        self.percent_msg = None
         self.last_reported_percent = 0
 
 def format_text(text, lang='en'):
@@ -97,16 +99,14 @@ def get_dynamic_developer_button():
     if button_toggle:
         text = "تواصل مع المطور"
         url = "tg://user?id=8467593882"
-        style = "primary"
     else:
         text = "المطور"
         url = "tg://user?id=8597653867"
-        style = "destructive"
     
     button_toggle = not button_toggle
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=text, url=url, style=style)]])
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=text, url=url)]])
 
-async def send_animated(chat_id: int, text: str, include_dev_btn: bool = False):
+async def send_animated(message: Message, text: str, include_dev_btn: bool = False, is_edit_cmd: bool = False, state: FSMContext = None):
     first_word = ""
     lines = text.split("\n")
     if lines and lines[0].split():
@@ -114,14 +114,31 @@ async def send_animated(chat_id: int, text: str, include_dev_btn: bool = False):
     else:
         first_word = "..."
         
-    msg = await bot.send_message(chat_id, first_word)
+    msg = await message.reply(first_word)
     final = await type_text(msg, text)
-    reply_markup = get_dynamic_developer_button() if include_dev_btn else None
+    
+    reply_markup = None
+    if include_dev_btn:
+        reply_markup = get_dynamic_developer_button()
+    elif is_edit_cmd and state:
+        user_data = await state.get_data()
+        is_active = user_data.get("lang_mode_active", False)
+        style = "destructive" if is_active else "primary"
+        
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="وضع اللغات", callback_data="toggle_lang_mode", style=style),
+                InlineKeyboardButton(text="تبديل اللغة", callback_data="switch_lang", style=style)
+            ],
+            [InlineKeyboardButton(text="مسح", callback_data="delete_edit_panel", style="destructive")]
+        ])
+        
     try:
         await msg.edit_text(final, reply_markup=reply_markup)
     except:
         pass
-    await bot.send_message(chat_id, get_next_emoji())
+    
+    emoji_msg = await msg.reply(get_next_emoji())
     return msg
 
 async def trigger_random_reaction(chat_id: int, message_id: int, message_obj: Message):
@@ -170,12 +187,23 @@ async def register_panel(chat_id: int, message_id: int):
         except:
             pass
 
+async def register_edit_panel(chat_id: int, panel_msg_id: int, user_msg_id: int):
+    if chat_id not in edit_panels_history:
+        edit_panels_history[chat_id] = []
+    edit_panels_history[chat_id].append((panel_msg_id, user_msg_id))
+    if len(edit_panels_history[chat_id]) > 3:
+        old_panel_id, old_user_id = edit_panels_history[chat_id].pop(0)
+        try:
+            await bot.delete_message(chat_id, old_panel_id)
+        except:
+            pass
+
 def get_main_reply_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="رد متعدد بالستيكرات", callback_data="add_reply_sticker", style="primary")],
-        [InlineKeyboardButton(text="رد متعدد بالنصوص", callback_data="add_reply_text", style="primary")],
-        [InlineKeyboardButton(text="المهلة الزمنية", callback_data="delay_settings", style="primary"), InlineKeyboardButton(text="عرض الردود", callback_data="view_replies", style="primary")],
-        [InlineKeyboardButton(text="مسح", callback_data="clear_panel", style="destructive")]
+        [InlineKeyboardButton(text="رد متعدد بالستيكرات", callback_data="add_reply_sticker")],
+        [InlineKeyboardButton(text="رد متعدد بالنصوص", callback_data="add_reply_text")],
+        [InlineKeyboardButton(text="المهلة الزمنية", callback_data="delay_settings"), InlineKeyboardButton(text="عرض الردود", callback_data="view_replies")],
+        [InlineKeyboardButton(text="مسح", callback_data="clear_panel")]
     ])
 
 @dp.message(F.text.in_({"رد", "اضف رد"}))
@@ -192,7 +220,7 @@ async def add_reply_command(message: Message, state: FSMContext):
             "هيج >< اذا تريد الرد ممنوع يبوكونه البواكين ضيف بهاي\n"
             "الصيغه هذا بعد الرمز ضيف / ثم ^ مثال هلو <> / ^\n"
             "او هلو >< / ^",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="الغاء", callback_data="cancel_silent", style="destructive")]])
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="الغاء", callback_data="cancel_silent")]])
         )
         await state.set_state(BotStates.waiting_for_trigger)
         return
@@ -264,7 +292,7 @@ async def add_reply_sticker_btn(query: CallbackQuery, state: FSMContext):
     await state.update_data(mode="sticker", sub_mode="awaiting_trigger")
     await query.message.edit_text(
         "¹# - ضيف الرد المتعدد يدعم الستيكرات\nبالكابشن وبدون كابشن",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="الغاء", callback_data="cancel_silent", style="destructive")]])
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="الغاء", callback_data="cancel_silent")]])
     )
     await state.set_state(BotStates.waiting_for_trigger)
 
@@ -273,7 +301,7 @@ async def add_reply_text_btn(query: CallbackQuery, state: FSMContext):
     await state.update_data(mode="text", sub_mode="awaiting_trigger")
     await query.message.edit_text(
         "¹# - ضيف الرد المتعدد يدعم الستيكرات\nبالكابشن وبدون كابشن",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="الغاء", callback_data="cancel_silent", style="destructive")]])
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="الغاء", callback_data="cancel_silent")]])
     )
     await state.set_state(BotStates.waiting_for_trigger)
 
@@ -312,7 +340,7 @@ async def process_reply_content(message: Message, state: FSMContext):
         sticker_file_id = message.sticker.file_id
         await state.update_data(current_sticker=sticker_file_id)
         
-        buttons = [[InlineKeyboardButton(text="اضف كابشن", callback_data="add_caption_active", style="primary")]]
+        buttons = [[InlineKeyboardButton(text="اضف كابشن", callback_data="add_caption_active")]]
         await message.reply_sticker(sticker_file_id, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
         return
         
@@ -330,7 +358,7 @@ async def process_reply_content(message: Message, state: FSMContext):
 @dp.callback_query(F.data == "add_caption_active")
 async def add_caption_active_callback(query: CallbackQuery, state: FSMContext):
     await query.message.edit_reply_markup(
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="اضف كابشن", callback_data="add_caption_active", style="destructive")]])
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="اضف كابشن", callback_data="add_caption_active")]])
     )
     await state.set_state(BotStates.waiting_for_sticker_caption)
 
@@ -357,7 +385,7 @@ async def process_sticker_caption(message: Message, state: FSMContext):
 async def more_yes_callback(query: CallbackQuery, state: FSMContext):
     await query.message.edit_text(
         "¹# - اضف الرد اللذي تريده ان يدعم\nهذا الرد ايضا",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="عودة", callback_data="more_back", style="destructive")]])
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="عودة", callback_data="more_back")]])
     )
     await state.set_state(BotStates.waiting_for_reply_content)
 
@@ -407,11 +435,10 @@ async def delay_settings_callback(query: CallbackQuery):
         row_buttons = []
         for val in row:
             is_active = (float(val) == current_delay)
-            style = "success" if is_active else "primary"
-            row_buttons.append(InlineKeyboardButton(text=val, callback_data=f"set_delay_{val}", style=style))
+            keyboard_buttons.append(InlineKeyboardButton(text=val, callback_data=f"set_delay_{val}"))
         keyboard_buttons.append(row_buttons)
         
-    keyboard_buttons.append([InlineKeyboardButton(text="عودة", callback_data="back_to_main", style="destructive")])
+    keyboard_buttons.append([InlineKeyboardButton(text="عودة", callback_data="back_to_main")])
     
     await query.message.edit_text(
         "المهلة الزمنية الفاصلة بين كل رسالة ورسالة\nمن الردود اللتي سيرسلها البوت",
@@ -436,11 +463,10 @@ async def set_delay_val_callback(query: CallbackQuery):
         row_buttons = []
         for val in row:
             is_active = (float(val) == new_delay)
-            style = "success" if is_active else "primary"
-            row_buttons.append(InlineKeyboardButton(text=val, callback_data=f"set_delay_{val}", style=style))
+            keyboard_buttons.append(InlineKeyboardButton(text=val, callback_data=f"set_delay_{val}"))
         keyboard_buttons.append(row_buttons)
         
-    keyboard_buttons.append([InlineKeyboardButton(text="عودة", callback_data="back_to_main", style="destructive")])
+    keyboard_buttons.append([InlineKeyboardButton(text="عودة", callback_data="back_to_main")])
     
     try:
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons))
@@ -471,7 +497,7 @@ async def view_replies_callback(query: CallbackQuery):
         
     await query.message.edit_text(
         "\n%\n".join(text_lines),
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="عودة", callback_data="back_to_main", style="destructive")]])
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="عودة", callback_data="back_to_main")]])
     )
 
 @dp.callback_query(F.data == "back_to_main")
@@ -506,14 +532,16 @@ async def execute_download(job: DownloadJob):
                         job.last_reported_percent = step
                         try:
                             loop = asyncio.get_event_loop()
-                            loop.create_task(job.msg_to_edit.edit_text(
-                                f"بدءت بالعثور ع\n{job.query}\nانتظر دادي بليز {job.last_reported_percent}%"
-                            ))
+                            if job.percent_msg:
+                                loop.create_task(job.percent_msg.edit_text(f"{job.last_reported_percent}%"))
                         except:
                             pass
 
-    msg = await send_animated(job.message.chat.id, f"بدءت بالعثور ع\n{job.query}\nانتظر دادي بليز 0%")
+    msg = await send_animated(job.message, f"بدءت بالعثور ع\n{job.query}\nانتظر دادي بليز")
     job.msg_to_edit = msg
+    
+    pct_msg = await job.message.reply("0%")
+    job.percent_msg = pct_msg
     
     try:
         ydl_opts = {'format': 'bestaudio', 'quiet': True}
@@ -524,7 +552,11 @@ async def execute_download(job: DownloadJob):
             channel = info['uploader']
         
         if url in file_cache:
-            sent_cache = await bot.send_audio(job.message.chat.id, file_cache[url], reply_markup=get_dynamic_developer_button())
+            try:
+                await pct_msg.delete()
+            except:
+                pass
+            sent_cache = await job.message.reply_audio(file_cache[url], reply_markup=get_dynamic_developer_button())
             asyncio.create_task(trigger_random_reaction(job.message.chat.id, sent_cache.message_id, sent_cache))
             return
         
@@ -539,6 +571,11 @@ async def execute_download(job: DownloadJob):
             ydl.download([url])
             filename = [f for f in os.listdir() if f.startswith("temp_")][0]
         
+        try:
+            await pct_msg.delete()
+        except:
+            pass
+            
         title_clean = re.sub(r'[^a-zA-Z0-9\s-&]', '', title)
         channel_clean = channel
         
@@ -553,7 +590,7 @@ async def execute_download(job: DownloadJob):
         
         from aiogram.types import FSInputFile
         audio_file = FSInputFile(filename, filename=final_name)
-        sent = await bot.send_audio(job.message.chat.id, audio_file, title=final_name, reply_markup=get_dynamic_developer_button())
+        sent = await job.message.reply_audio(audio_file, title=final_name, reply_markup=get_dynamic_developer_button())
         file_cache[url] = sent.audio.file_id
         
         if os.path.exists(filename):
@@ -563,6 +600,10 @@ async def execute_download(job: DownloadJob):
         asyncio.create_task(trigger_random_reaction(job.message.chat.id, sent.message_id, sent))
         
     except:
+        try:
+            await pct_msg.delete()
+        except:
+            pass
         err_msg = await msg.edit_text("الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي", reply_markup=get_dynamic_developer_button())
         asyncio.create_task(trigger_random_reaction(job.message.chat.id, err_msg.message_id, err_msg))
         for f in os.listdir():
@@ -585,46 +626,108 @@ async def disable_chat(message: Message):
         await message.reply("¹# - تم تعطيل اليوت مولاي\nاليوتيوب معطل")
 
 @dp.message(F.chat.type == "private", F.text == "ادت")
-async def edit_cmd(message: Message):
-    buttons = [
-        [InlineKeyboardButton(text="وضع اللغات", callback_data="lang_mode"), InlineKeyboardButton(text="تبديل اللغة", callback_data="switch_lang")],
-        [InlineKeyboardButton(text="الغاء", callback_data="cancel")]
-    ]
-    markup = InlineKeyboardMarkup(inline_keyboard=buttons)
-    animated_msg = await send_animated(message.chat.id, "تريد تغير لغة وضع اللغات دوس ع الزر الفوك يسار\nتريد تفعل وضع اللغات دوس ع الزر الفوك يمين", include_dev_btn=True)
-    await message.reply("Options:", reply_markup=markup)
-    
+async def edit_cmd(message: Message, state: FSMContext):
+    animated_msg = await send_animated(
+        message, 
+        "تريد تغير لغة وضع اللغات دوس ع الزر الفوك يسار\nتريد تفعل وضع اللغات دوس ع الزر الفوك يمين", 
+        include_dev_btn=False,
+        is_edit_cmd=True,
+        state=state
+    )
+    await register_edit_panel(message.chat.id, animated_msg.message_id, message.message_id)
     asyncio.create_task(trigger_random_reaction(message.chat.id, message.message_id, message))
     asyncio.create_task(trigger_random_reaction(message.chat.id, animated_msg.message_id, animated_msg))
 
-@dp.callback_query(F.data == "cancel")
-async def cancel_handler(query: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await query.message.delete()
-    sent_msg = await bot.send_message(query.message.chat.id, get_next_emoji(), reply_markup=get_dynamic_developer_button())
-    asyncio.create_task(trigger_random_reaction(query.message.chat.id, sent_msg.message_id, sent_msg))
+@dp.callback_query(F.data == "delete_edit_panel")
+async def delete_edit_panel_handler(query: CallbackQuery):
+    chat_id = query.message.chat.id
+    try:
+        await query.message.delete()
+    except:
+        pass
+    if chat_id in edit_panels_history:
+        matched_pairs = [pair for pair in edit_panels_history[chat_id] if pair[0] == query.message.message_id]
+        if matched_pairs:
+            pair = matched_pairs[0]
+            try:
+                await bot.delete_message(chat_id, pair[1])
+            except:
+                pass
+            edit_panels_history[chat_id].remove(pair)
 
-@dp.callback_query(F.data == "lang_mode")
-async def lang_mode_handler(query: CallbackQuery, state: FSMContext):
-    user_settings[query.from_user.id] = user_settings.get(query.from_user.id, {})
-    user_settings[query.from_user.id]['active'] = True
-    await state.set_state(BotStates.waiting_for_lang_input)
-    await query.answer("تم تفعيل وضع اللغات")
+@dp.callback_query(F.data == "toggle_lang_mode")
+async def toggle_lang_mode_callback(query: CallbackQuery, state: FSMContext):
+    user_data = await state.get_data()
+    is_active = not user_data.get("lang_mode_active", False)
+    await state.update_data(lang_mode_active=is_active)
+    
+    if is_active:
+        user_settings[query.from_user.id] = user_settings.get(query.from_user.id, {})
+        user_settings[query.from_user.id]['active'] = True
+        await state.set_state(BotStates.waiting_for_lang_input)
+        await query.answer("تم تفعيل وضع اللغات\nالوضع ✅", show_alert=True)
+    else:
+        user_settings[query.from_user.id] = user_settings.get(query.from_user.id, {})
+        user_settings[query.from_user.id]['active'] = False
+        await state.clear()
+        await query.answer("تم تعطيل وضع اللغات\nالوضع ❌", show_alert=True)
+        
+    style = "destructive" if is_active else "primary"
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="وضع اللغات", callback_data="toggle_lang_mode", style=style),
+            InlineKeyboardButton(text="تبديل اللغة", callback_data="switch_lang", style=style)
+        ],
+        [InlineKeyboardButton(text="مسح", callback_data="delete_edit_panel", style="destructive")]
+    ])
+    
+    try:
+        await query.message.edit_reply_markup(reply_markup=reply_markup)
+    except:
+        pass
 
 @dp.callback_query(F.data == "switch_lang")
-async def switch_lang_handler(query: CallbackQuery):
-    buttons = [[InlineKeyboardButton(text="انكليزية", callback_data="set_en"), InlineKeyboardButton(text="روسية", callback_data="set_ru")]]
-    await query.message.edit_text("تغيير اللغة", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+async def switch_lang_handler(query: CallbackQuery, state: FSMContext):
+    user_data = await state.get_data()
+    is_active = user_data.get("lang_mode_active", False)
+    style = "destructive" if is_active else "primary"
+    
+    buttons = [
+        [
+            InlineKeyboardButton(text="انكليزية", callback_data="set_en", style=style), 
+            InlineKeyboardButton(text="روسية", callback_data="set_ru", style=style)
+        ],
+        [InlineKeyboardButton(text="مسح", callback_data="delete_edit_panel", style="destructive")]
+    ]
+    try:
+        await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    except:
+        pass
 
 @dp.callback_query(F.data.startswith("set_"))
-async def set_lang_handler(query: CallbackQuery):
+async def set_lang_handler(query: CallbackQuery, state: FSMContext):
     lang = query.data.split("_")[1]
     user_settings[query.from_user.id] = user_settings.get(query.from_user.id, {})
     user_settings[query.from_user.id]['lang'] = lang
-    await query.message.delete()
+    
+    user_data = await state.get_data()
+    is_active = user_data.get("lang_mode_active", False)
+    style = "destructive" if is_active else "primary"
+    
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="وضع اللغات", callback_data="toggle_lang_mode", style=style),
+            InlineKeyboardButton(text="تبديل اللغة", callback_data="switch_lang", style=style)
+        ],
+        [InlineKeyboardButton(text="مسح", callback_data="delete_edit_panel", style="destructive")]
+    ])
+    try:
+        await query.message.edit_reply_markup(reply_markup=reply_markup)
+    except:
+        pass
+        
     lang_str = "الروسية" if lang == "ru" else "الانكليزية"
-    sent_msg = await bot.send_message(query.message.chat.id, f"تم تبديل لغة وضع اللغات الى\nذكر اللغة {lang_str}", reply_markup=get_dynamic_developer_button())
-    asyncio.create_task(trigger_random_reaction(query.message.chat.id, sent_msg.message_id, sent_msg))
+    await query.answer(f"تم تبديل اللغة إلى {lang_str}", show_alert=True)
 
 @dp.message(F.text.startswith("يوت "))
 async def youtube_download_router(message: Message):
@@ -650,12 +753,12 @@ async def lang_input_handler(message: Message):
     
     if has_ar and not has_other:
         trans = translator.translate(text, dest=lang).text
-        animated_msg = await send_animated(message.chat.id, format_text(trans, lang), include_dev_btn=True)
+        animated_msg = await send_animated(message, format_text(trans, lang), include_dev_btn=False)
     elif has_other:
-        animated_msg = await send_animated(message.chat.id, format_text(text, lang), include_dev_btn=True)
+        animated_msg = await send_animated(message, format_text(text, lang), include_dev_btn=False)
     else:
         trans = translator.translate(text, dest=lang).text
-        animated_msg = await send_animated(message.chat.id, format_text(trans, lang), include_dev_btn=True)
+        animated_msg = await send_animated(message, format_text(trans, lang), include_dev_btn=False)
         
     asyncio.create_task(trigger_random_reaction(message.chat.id, message.message_id, message))
     asyncio.create_task(trigger_random_reaction(message.chat.id, animated_msg.message_id, animated_msg))
@@ -730,7 +833,7 @@ async def global_handler(message: Message):
 
     if message.text and not message.text.startswith("يوت ") and message.text != "ادت":
         animated_msg = await send_animated(
-            message.chat.id, 
+            message, 
             "اهلين وياك بوت اليوتيوب تريد اغنيتك\nكول يوت ومن ثم اذكر العنوان", 
             include_dev_btn=True
         )
