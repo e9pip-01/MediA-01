@@ -1,5 +1,10 @@
-python-telegram-bot
-python-chess
-cairosvg
-stockfish
-aiohttp
+aiogram
+yt-dlp
+googletrans
+aiodns
+pycares
+cchardet
+httpx
+orjson
+brotli
+certifi
