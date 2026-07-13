@@ -28,15 +28,23 @@ emoji_index = 0
 button_toggle = True
 last_reactions = []
 
-custom_replies = {}
-reply_delay = {}
-last_sent_response = {}
+chat_replies = {}
+chat_delays = {}
+chat_control_panels = {}
 
 class BotStates(StatesGroup):
     waiting_for_lang_input = State()
     waiting_for_trigger = State()
-    waiting_for_multi_responses = State()
+    waiting_for_reply_content = State()
     waiting_for_sticker_caption = State()
+    waiting_for_more_decision = State()
+
+class DownloadJob:
+    def __init__(self, message: Message, query: str):
+        self.message = message
+        self.query = query
+        self.msg_to_edit = None
+        self.last_reported_percent = 0
 
 def format_text(text, lang='en'):
     if lang == 'en':
@@ -95,10 +103,26 @@ async def send_animated(chat_id: int, text: str, include_dev_btn: bool = False):
     msg = await bot.send_message(chat_id, ".")
     final = await type_text(msg, text)
     reply_markup = get_dynamic_developer_button() if include_dev_btn else None
-    await msg.edit_text(final + "\n\n" + get_next_emoji(), reply_markup=reply_markup)
+    try:
+        await msg.edit_text(final, reply_markup=reply_markup)
+    except:
+        pass
+    await bot.send_message(chat_id, get_next_emoji())
     return msg
 
-async def trigger_random_reaction(chat_id: int, message_id: int):
+async def trigger_random_reaction(chat_id: int, message_id: int, message_obj: Message):
+    bot_info = await bot.get_me()
+    is_bot_msg = message_obj.from_user.id == bot_info.id
+
+    if message_obj.chat.type in ["group", "supergroup", "channel"]:
+        if not is_bot_msg:
+            try:
+                member = await bot.get_chat_member(chat_id, message_obj.from_user.id)
+                if member.status != "creator":
+                    return
+            except:
+                return
+
     global last_reactions
     available = [r for r in reaction_list if r not in last_reactions]
     if not available:
@@ -115,12 +139,330 @@ async def trigger_random_reaction(chat_id: int, message_id: int):
     except:
         pass
 
-class DownloadJob:
-    def __init__(self, message: Message, query: str):
-        self.message = message
-        self.query = query
-        self.msg_to_edit = None
-        self.last_reported_percent = 0
+async def is_admin(message: Message) -> bool:
+    if message.chat.type == "private":
+        return True
+    member = await bot.get_chat_member(message.chat.id, message.from_user.id)
+    return member.status in ["creator", "administrator"]
+
+async def register_panel(chat_id: int, message_id: int):
+    if chat_id not in chat_control_panels:
+        chat_control_panels[chat_id] = []
+    chat_control_panels[chat_id].append(message_id)
+    if len(chat_control_panels[chat_id]) > 3:
+        old_id = chat_control_panels[chat_id].pop(0)
+        try:
+            await bot.delete_message(chat_id, old_id)
+        except:
+            pass
+
+def get_main_reply_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="رد متعدد بالستيكرات", callback_data="add_reply_sticker", style="primary")],
+        [InlineKeyboardButton(text="رد متعدد بالنصوص", callback_data="add_reply_text", style="primary")],
+        [InlineKeyboardButton(text="المهلة الزمنية", callback_data="delay_settings", style="primary"), InlineKeyboardButton(text="عرض الردود", callback_data="view_replies", style="primary")],
+        [InlineKeyboardButton(text="مسح", callback_data="clear_panel", style="destructive")]
+    ])
+
+@dp.message(F.text.in_({"رد", "اضف رد"}))
+async def add_reply_command(message: Message, state: FSMContext):
+    if not await is_admin(message):
+        return
+    
+    if message.reply_to_message and message.reply_to_message.sticker:
+        await state.update_data(rep_sticker=message.reply_to_message.sticker.file_id)
+        await message.reply(
+            "¹# - مولاي هاي بعض الرموز وصيغتها اذا تدز\n"
+            "رد تريده ينعرض بأول الكلمة من النص سوي هذا الرمز\n"
+            "بعد الكلمة مثال هلو <> اذا بكل مكان بالنص سوي\n"
+            "هيج >< اذا تريد الرد ممنوع يبوكونه البواكين ضيف بهاي\n"
+            "الصيغه هذا بعد الرمز ضيف / ثم ^ مثال هلو <> / ^\n"
+            "او هلو >< / ^",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="الغاء", callback_data="cancel_silent", style="destructive")]])
+        )
+        await state.set_state(BotStates.waiting_for_trigger)
+        return
+
+    msg = await message.reply("¹# - ازرار الردود المتعددة والمنفردة\nشتفضل بكيفك", reply_markup=get_main_reply_keyboard())
+    await register_panel(message.chat.id, msg.message_id)
+
+@dp.message(F.text.startswith("رد ") | F.text.startswith("اضف رد "))
+async def fast_reply_add(message: Message, state: FSMContext):
+    if not await is_admin(message):
+        return
+    
+    cmd_part = "اضف رد " if message.text.startswith("اضف رد ") else "رد "
+    trigger_part = message.text.replace(cmd_part, "").strip()
+    
+    lines = trigger_part.split("\n", 1)
+    if len(lines) < 2:
+        return
+        
+    trigger_line = lines[0].strip()
+    reply_content = lines[1].strip()
+    
+    is_anywhere = "<>" in trigger_line
+    is_start = "><" in trigger_line
+    is_protected = " / ^" in trigger_line
+    
+    clean_trigger = trigger_line.replace("<>", "").replace("><", "").replace(" / ^", "").strip()
+    
+    reply_pool = []
+    for chunk in reply_content.split("\n%\n"):
+        chunk = chunk.strip()
+        if chunk:
+            reply_pool.append({"type": "text", "content": chunk})
+            
+    if not reply_pool:
+        return
+        
+    chat_id = message.chat.id
+    if chat_id not in chat_replies:
+        chat_replies[chat_id] = {}
+        
+    chat_replies[chat_id][clean_trigger] = {
+        "is_anywhere": is_anywhere,
+        "is_start": is_start,
+        "is_protected": is_protected,
+        "pool": reply_pool,
+        "last_indices": []
+    }
+    
+    await message.reply(f"¹# - الرد المضاف هو {clean_trigger}\nتدلل يبعدي")
+
+@dp.callback_query(F.data == "cancel_silent")
+async def cancel_silent_handler(query: CallbackQuery, state: FSMContext):
+    await state.clear()
+    try:
+        await query.message.delete()
+    except:
+        pass
+
+@dp.callback_query(F.data == "clear_panel")
+async def clear_panel_handler(query: CallbackQuery):
+    try:
+        await query.message.delete()
+    except:
+        pass
+
+@dp.callback_query(F.data == "add_reply_sticker")
+async def add_reply_sticker_btn(query: CallbackQuery, state: FSMContext):
+    await state.update_data(mode="sticker", sub_mode="awaiting_trigger")
+    await query.message.edit_text(
+        "¹# - ضيف الرد المتعدد يدعم الستيكرات\nبالكابشن وبدون كابشن",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="الغاء", callback_data="cancel_silent", style="destructive")]])
+    )
+    await state.set_state(BotStates.waiting_for_trigger)
+
+@dp.callback_query(F.data == "add_reply_text")
+async def add_reply_text_btn(query: CallbackQuery, state: FSMContext):
+    await state.update_data(mode="text", sub_mode="awaiting_trigger")
+    await query.message.edit_text(
+        "¹# - ضيف الرد المتعدد يدعم الستيكرات\nبالكابشن وبدون كابشن",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="الغاء", callback_data="cancel_silent", style="destructive")]])
+    )
+    await state.set_state(BotStates.waiting_for_trigger)
+
+@dp.message(BotStates.waiting_for_trigger)
+async def process_trigger_input(message: Message, state: FSMContext):
+    trigger_text = message.text
+    if not trigger_text:
+        return
+        
+    is_anywhere = "<>" in trigger_text
+    is_start = "><" in trigger_text
+    is_protected = " / ^" in trigger_text
+    
+    clean_trigger = trigger_text.replace("<>", "").replace("><", "").replace(" / ^", "").strip()
+    
+    await state.update_data(
+        trigger=clean_trigger,
+        is_anywhere=is_anywhere,
+        is_start=is_start,
+        is_protected=is_protected,
+        pool=[]
+    )
+    
+    await message.reply("¹# - ارسل الردود اللتي تود اضافتها على\nهذا الرد")
+    await state.set_state(BotStates.waiting_for_reply_content)
+
+@dp.message(BotStates.waiting_for_reply_content)
+async def process_reply_content(message: Message, state: FSMContext):
+    data = await state.get_data()
+    mode = data.get("mode", "sticker")
+    
+    if message.sticker:
+        if mode == "text":
+            return
+            
+        sticker_file_id = message.sticker.file_id
+        await state.update_data(current_sticker=sticker_file_id)
+        
+        buttons = [[InlineKeyboardButton(text="اضف كابشن", callback_data="add_caption_active", style="primary")]]
+        await message.reply_sticker(sticker_file_id, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+        return
+        
+    if message.text:
+        pool = data.get("pool", [])
+        pool.append({"type": "text", "content": message.text})
+        await state.update_data(pool=pool)
+        
+        buttons = [
+            [InlineKeyboardButton(text="نعم", callback_data="more_yes"), InlineKeyboardButton(text="لا", callback_data="more_no")]
+        ]
+        await message.reply("¹# - هل تود اضافة المزيد من الردود لهذا الرد\nانقر على زر نعم او لا", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+        await state.set_state(BotStates.waiting_for_more_decision)
+
+@dp.callback_query(F.data == "add_caption_active")
+async def add_caption_active_callback(query: CallbackQuery, state: FSMContext):
+    await query.message.edit_reply_markup(
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="اضف كابشن", callback_data="add_caption_active", style="destructive")]])
+    )
+    await state.set_state(BotStates.waiting_for_sticker_caption)
+
+@dp.message(BotStates.waiting_for_sticker_caption)
+async def process_sticker_caption(message: Message, state: FSMContext):
+    if not message.text:
+        return
+        
+    data = await state.get_data()
+    pool = data.get("pool", [])
+    sticker_id = data.get("current_sticker")
+    
+    if sticker_id:
+        pool.append({"type": "sticker", "file_id": sticker_id, "caption": message.text})
+        await state.update_data(pool=pool, current_sticker=None)
+        
+    buttons = [
+        [InlineKeyboardButton(text="نعم", callback_data="more_yes"), InlineKeyboardButton(text="لا", callback_data="more_no")]
+    ]
+    await message.reply("¹# - هل تود اضافة المزيد من الردود لهذا الرد\nانقر على زر نعم او لا", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    await state.set_state(BotStates.waiting_for_more_decision)
+
+@dp.callback_query(F.data == "more_yes")
+async def more_yes_callback(query: CallbackQuery, state: FSMContext):
+    await query.message.edit_text(
+        "¹# - اضف الرد اللذي تريده ان يدعم\nهذا الرد ايضا",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="عودة", callback_data="more_back", style="destructive")]])
+    )
+    await state.set_state(BotStates.waiting_for_reply_content)
+
+@dp.callback_query(F.data == "more_back")
+async def more_back_callback(query: CallbackQuery, state: FSMContext):
+    buttons = [
+        [InlineKeyboardButton(text="نعم", callback_data="more_yes"), InlineKeyboardButton(text="لا", callback_data="more_no")]
+    ]
+    await query.message.edit_text("¹# - هل تود اضافة المزيد من الردود لهذا الرد\nانقر على زر نعم او لا", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    await state.set_state(BotStates.waiting_for_more_decision)
+
+@dp.callback_query(F.data == "more_no")
+async def more_no_callback(query: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    trigger = data.get("trigger")
+    pool = data.get("pool", [])
+    
+    if trigger and pool:
+        chat_id = query.message.chat.id
+        if chat_id not in chat_replies:
+            chat_replies[chat_id] = {}
+            
+        chat_replies[chat_id][trigger] = {
+            "is_anywhere": data.get("is_anywhere", False),
+            "is_start": data.get("is_start", False),
+            "is_protected": data.get("is_protected", False),
+            "pool": pool,
+            "last_indices": []
+        }
+        
+    await query.message.edit_text(f"¹# - الرد المضاف هو {trigger}\nتدلل يبعدي")
+    await state.clear()
+
+@dp.callback_query(F.data == "delay_settings")
+async def delay_settings_callback(query: CallbackQuery):
+    chat_id = query.message.chat.id
+    current_delay = chat_delays.get(chat_id, 0.1)
+    
+    buttons_layout = [
+        ["6.3", "3.6", "1.2"],
+        ["2.4", "4.2", "2.1"],
+        ["3.2", "2.3", "4.8"]
+    ]
+    
+    keyboard_buttons = []
+    for row in buttons_layout:
+        row_buttons = []
+        for val in row:
+            is_active = (float(val) == current_delay)
+            style = "success" if is_active else "primary"
+            row_buttons.append(InlineKeyboardButton(text=val, callback_data=f"set_delay_{val}", style=style))
+        keyboard_buttons.append(row_buttons)
+        
+    keyboard_buttons.append([InlineKeyboardButton(text="عودة", callback_data="back_to_main", style="destructive")])
+    
+    await query.message.edit_text(
+        "المهلة الزمنية الفاصلة بين كل رسالة ورسالة\nمن الردود اللتي سيرسلها البوت",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    )
+
+@dp.callback_query(F.data.startswith("set_delay_"))
+async def set_delay_val_callback(query: CallbackQuery):
+    chat_id = query.message.chat.id
+    val_str = query.data.split("_")[2]
+    new_delay = float(val_str)
+    chat_delays[chat_id] = new_delay
+    
+    buttons_layout = [
+        ["6.3", "3.6", "1.2"],
+        ["2.4", "4.2", "2.1"],
+        ["3.2", "2.3", "4.8"]
+    ]
+    
+    keyboard_buttons = []
+    for row in buttons_layout:
+        row_buttons = []
+        for val in row:
+            is_active = (float(val) == new_delay)
+            style = "success" if is_active else "primary"
+            row_buttons.append(InlineKeyboardButton(text=val, callback_data=f"set_delay_{val}", style=style))
+        keyboard_buttons.append(row_buttons)
+        
+    keyboard_buttons.append([InlineKeyboardButton(text="عودة", callback_data="back_to_main", style="destructive")])
+    
+    try:
+        await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons))
+    except:
+        pass
+    await query.answer()
+
+@dp.callback_query(F.data == "view_replies")
+async def view_replies_callback(query: CallbackQuery):
+    chat_id = query.message.chat.id
+    replies = chat_replies.get(chat_id, {})
+    
+    if not replies:
+        await query.answer("ليس هناك ردود مضافه عزيزي\nاضف رد وسيتم عرض تسمية الرد هنا", show_alert=True)
+        return
+        
+    text_lines = []
+    for trigger, meta in replies.items():
+        suffix = ""
+        if meta["is_anywhere"]:
+            suffix += " <>"
+        if meta["is_start"]:
+            suffix += " ><"
+        if meta["is_protected"]:
+            suffix += " / ^"
+            
+        text_lines.append(f"{trigger}{suffix}")
+        
+    await query.message.edit_text(
+        "\n%\n".join(text_lines),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="عودة", callback_data="back_to_main", style="destructive")]])
+    )
+
+@dp.callback_query(F.data == "back_to_main")
+async def back_to_main_callback(query: CallbackQuery):
+    await query.message.edit_text("¹# - ازرار الردود المتعددة والمنفردة\nشتفضل بكيفك", reply_markup=get_main_reply_keyboard())
 
 async def process_queue():
     global active_downloads
@@ -168,7 +510,8 @@ async def execute_download(job: DownloadJob):
             channel = info['uploader']
         
         if url in file_cache:
-            await bot.send_audio(job.message.chat.id, file_cache[url], reply_markup=get_dynamic_developer_button())
+            sent_cache = await bot.send_audio(job.message.chat.id, file_cache[url], reply_markup=get_dynamic_developer_button())
+            asyncio.create_task(trigger_random_reaction(job.message.chat.id, sent_cache.message_id, sent_cache))
             return
         
         ydl_down_opts = {
@@ -203,26 +546,16 @@ async def execute_download(job: DownloadJob):
             os.remove(filename)
         user_settings.clear()
         
+        asyncio.create_task(trigger_random_reaction(job.message.chat.id, sent.message_id, sent))
+        
     except:
-        await msg.edit_text("الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي", reply_markup=get_dynamic_developer_button())
+        err_msg = await msg.edit_text("الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي", reply_markup=get_dynamic_developer_button())
+        asyncio.create_task(trigger_random_reaction(job.message.chat.id, err_msg.message_id, err_msg))
         for f in os.listdir():
             if f.startswith("temp_"):
                 try: os.remove(f)
                 except: pass
         user_settings.clear()
-
-async def is_admin(message: Message) -> bool:
-    member = await bot.get_chat_member(message.chat.id, message.from_user.id)
-    return member.status in ["creator", "administrator"]
-
-def get_main_reply_keyboard():
-    buttons = [
-        [InlineKeyboardButton(text="رد متعدد بالستيكرات", callback_data="add_multi_sticker")],
-        [InlineKeyboardButton(text="رد متعدد بالنصوص", callback_data="add_multi_text")],
-        [InlineKeyboardButton(text="المهلة الزمنية", callback_data="show_delays"), InlineKeyboardButton(text="عرض الردود", callback_data="show_replies")],
-        [InlineKeyboardButton(text="مسح", callback_data="delete_panel")]
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 @dp.message(F.chat.type.in_(["group", "supergroup", "channel"]), F.text == "تفعيل")
 async def enable_chat(message: Message):
@@ -244,276 +577,18 @@ async def edit_cmd(message: Message):
         [InlineKeyboardButton(text="الغاء", callback_data="cancel")]
     ]
     markup = InlineKeyboardMarkup(inline_keyboard=buttons)
-    await send_animated(message.chat.id, "تريد تغير لغة وضع اللغات دوس ع الزر الفوك يسار\nتريد تفعل وضع اللغات دوس ع الزر الفوك يمين", include_dev_btn=True)
+    animated_msg = await send_animated(message.chat.id, "تريد تغير لغة وضع اللغات دوس ع الزر الفوك يسار\nتريد تفعل وضع اللغات دوس ع الزر الفوك يمين", include_dev_btn=True)
     await message.reply("Options:", reply_markup=markup)
-    asyncio.create_task(trigger_random_reaction(message.chat.id, message.message_id))
-
-@dp.message(F.text.in_(["رد", "اضف رد"]))
-async def add_reply_command(message: Message):
-    if message.chat.type in ["group", "supergroup", "channel"] and message.chat.id not in enabled_chats:
-        return
     
-    if message.reply_to_message and message.reply_to_message.sticker:
-        sticker = message.reply_to_message.sticker
-        raw_cmd = message.text.replace("رد", "").replace("اضف", "").strip()
-        
-        is_everywhere = "<>" in raw_cmd
-        is_start = "><" in raw_cmd
-        is_protected = "/ ^" in raw_cmd or "/^" in raw_cmd
-        
-        trigger = raw_cmd.replace("<>", "").replace("><", "").replace("/ ^", "").replace("/^", "").strip()
-        
-        if not trigger and message.reply_to_message.text:
-            trigger = message.reply_to_message.text
-        
-        if trigger:
-            chat_id = message.chat.id
-            if chat_id not in custom_replies:
-                custom_replies[chat_id] = []
-            
-            custom_replies[chat_id].append({
-                "trigger": trigger,
-                "is_everywhere": is_everywhere,
-                "is_start": is_start,
-                "is_protected": is_protected,
-                "type": "sticker",
-                "sticker_file_id": sticker.file_id,
-                "responses": [],
-                "is_sticker_only": True
-            })
-            await message.reply("¹# - الرد المضاف هو ملصق\nتدلل يبعدي")
-            return
-
-    markup = get_main_reply_keyboard()
-    sent_msg = await message.reply("¹# - ازرار الردود المتعددة والمنفردة\nشتفضل بكيفك", reply_markup=markup)
-    user_settings[message.from_user.id] = user_settings.get(message.from_user.id, {})
-    user_settings[message.from_user.id]['panel_msg_id'] = sent_msg.message_id
-    user_settings[message.from_user.id]['cmd_msg_id'] = message.message_id
-
-@dp.callback_query(F.data == "delete_panel")
-async def delete_panel_handler(query: CallbackQuery):
-    user_data = user_settings.get(query.from_user.id, {})
-    cmd_id = user_data.get('cmd_msg_id')
-    try:
-        await query.message.delete()
-        if cmd_id:
-            await bot.delete_message(query.message.chat.id, cmd_id)
-    except:
-        pass
-
-@dp.callback_query(F.data == "show_replies")
-async def show_replies_handler(query: CallbackQuery):
-    chat_id = query.message.chat.id
-    replies = custom_replies.get(chat_id, [])
-    if not replies:
-        await query.answer("ليس هناك ردود مضافه عزيزي\nاضف رد وسيتم عرض تسمية الرد هنا", show_alert=True)
-        return
-    
-    text_lines = []
-    for r in replies:
-        syms = ""
-        if r["is_everywhere"]:
-            syms += " <>"
-        elif r["is_start"]:
-            syms += " ><"
-        if r["is_protected"]:
-            syms += " / ^"
-        
-        text_lines.append(f"{r['trigger']}{syms}")
-    
-    markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="عودة", callback_data="back_to_main")]])
-    await query.message.edit_text("\n".join(text_lines), reply_markup=markup)
-
-@dp.callback_query(F.data == "show_delays")
-async def show_delays_handler(query: CallbackQuery):
-    chat_id = query.message.chat.id
-    current_val = reply_delay.get(chat_id, 0.1)
-    
-    def get_style(val):
-        return "success" if abs(current_val - val) < 0.01 else "primary"
-
-    buttons = [
-        [
-            InlineKeyboardButton(text="6.3", callback_data="set_delay_6.3", style=get_style(6.3)),
-            InlineKeyboardButton(text="3.6", callback_data="set_delay_3.6", style=get_style(3.6)),
-            InlineKeyboardButton(text="1.2", callback_data="set_delay_1.2", style=get_style(1.2))
-        ],
-        [
-            InlineKeyboardButton(text="2.4", callback_data="set_delay_2.4", style=get_style(2.4)),
-            InlineKeyboardButton(text="4.2", callback_data="set_delay_4.2", style=get_style(4.2)),
-            InlineKeyboardButton(text="2.1", callback_data="set_delay_2.1", style=get_style(2.1))
-        ],
-        [
-            InlineKeyboardButton(text="3.2", callback_data="set_delay_3.2", style=get_style(3.2)),
-            InlineKeyboardButton(text="2.3", callback_data="set_delay_2.3", style=get_style(2.3)),
-            InlineKeyboardButton(text="4.8", callback_data="set_delay_4.8", style=get_style(4.8))
-        ],
-        [InlineKeyboardButton(text="عودة", callback_data="back_to_main", style="destructive")]
-    ]
-    await query.message.edit_text("المهلة الزمنية الفاصة بين كل رسالة ورسالة\nمن الردود اللتي سيرسلها البوت", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
-
-@dp.callback_query(F.data.startswith("set_delay_"))
-async def set_delay_val(query: CallbackQuery):
-    val = float(query.data.split("_")[2])
-    chat_id = query.message.chat.id
-    reply_delay[chat_id] = val
-    await show_delays_handler(query)
-
-@dp.callback_query(F.data == "back_to_main")
-async def back_to_main_handler(query: CallbackQuery):
-    markup = get_main_reply_keyboard()
-    await query.message.edit_text("¹# - ازرار الردود المتعددة والمنفردة\nشتفضل بكيفك", reply_markup=markup)
-
-@dp.callback_query(F.data == "add_multi_sticker")
-async def add_multi_sticker_handler(query: CallbackQuery, state: FSMContext):
-    await state.set_state(BotStates.waiting_for_trigger)
-    await state.update_data(mode="sticker")
-    
-    cancel_markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="الغاء", callback_data="cancel_addition")]])
-    await query.message.edit_text("¹# - ضيف الرد المتعدد يدعم الستيكرات\nبالكابشن وبدون كابشن", reply_markup=cancel_markup)
-
-@dp.callback_query(F.data == "add_multi_text")
-async def add_multi_text_handler(query: CallbackQuery, state: FSMContext):
-    await state.set_state(BotStates.waiting_for_trigger)
-    await state.update_data(mode="text")
-    
-    cancel_markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="الغاء", callback_data="cancel_addition")]])
-    await query.message.edit_text("¹# - ضيف الرد المتعدد يدعم الستيكرات\nبالكابشن وبدون كابشن", reply_markup=cancel_markup)
-
-@dp.callback_query(F.data == "cancel_addition")
-async def cancel_addition_handler(query: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await query.message.delete()
-
-@dp.message(BotStates.waiting_for_trigger)
-async def trigger_received(message: Message, state: FSMContext):
-    if message.chat.type in ["group", "supergroup", "channel"] and message.chat.id not in enabled_chats:
-        return
-
-    text = message.text or ""
-    is_everywhere = "<>" in text
-    is_start = "><" in text
-    is_protected = "/ ^" in text or "/^" in text
-    
-    trigger = text.replace("<>", "").replace("><", "").replace("/ ^", "").replace("/^", "").strip()
-    
-    if not trigger:
-        await message.reply("¹# - مولاي هاي بعض الرموز وصيغتها اذا تدز\nرد تريده ينعرض بأول الكلمة من النص سوي هذا الرمز\nبعد الكلمة مثال هلو <> اذا بكل مكان بالنص سوي\nهيج >< اذا تريد الرد ممنوع يبوكونه البواكين ضيف بهاي\nالصيغه هذا بعد الرمز ضيف / ثم ^ مثال هلو <> / ^\nاو هلو >< / ^", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="الغاء", callback_data="cancel_addition")]]))
-        return
-        
-    await state.update_data(
-        trigger=trigger,
-        is_everywhere=is_everywhere,
-        is_start=is_start,
-        is_protected=is_protected,
-        responses=[]
-    )
-    await state.set_state(BotStates.waiting_for_multi_responses)
-    await message.reply("¹# - ارسل الردود اللتي تود اضافتها على\nهذا الرد")
-
-@dp.message(BotStates.waiting_for_multi_responses)
-async def responses_collect(message: Message, state: FSMContext):
-    if message.chat.type in ["group", "supergroup", "channel"] and message.chat.id not in enabled_chats:
-        return
-
-    data = await state.get_data()
-    mode = data.get("mode")
-    responses = data.get("responses", [])
-    
-    if message.sticker:
-        if mode == "text":
-            return
-        
-        sent = await message.reply_sticker(message.sticker.file_id, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="اضف كابشن", callback_data="add_caption_for_sticker")]]))
-        await state.update_data(last_sticker_file_id=message.sticker.file_id, last_sticker_msg_id=sent.message_id)
-        await state.set_state(BotStates.waiting_for_sticker_caption)
-        return
-        
-    text = message.text
-    if text:
-        parts = [p.strip() for p in text.split("%") if p.strip()]
-        for p in parts:
-            responses.append({"type": "text", "content": p})
-            
-        await state.update_data(responses=responses)
-        
-        markup = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="نعم", callback_data="add_more_yes"), InlineKeyboardButton(text="لا", callback_data="add_more_no")]
-        ])
-        await message.reply("¹# - هل تود اضافة المزيد من الردود لهذا الرد\nانقر على زر نعم او لا", reply_markup=markup)
-
-@dp.callback_query(F.data == "add_caption_for_sticker", BotStates.waiting_for_sticker_caption)
-async def init_sticker_caption(query: CallbackQuery, state: FSMContext):
-    await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="اضف كابشن", callback_data="waiting_caption_active", style="destructive")]]))
-
-@dp.message(BotStates.waiting_for_sticker_caption)
-async def sticker_caption_handler(message: Message, state: FSMContext):
-    if message.chat.type in ["group", "supergroup", "channel"] and message.chat.id not in enabled_chats:
-        return
-
-    data = await state.get_data()
-    responses = data.get("responses", [])
-    sticker_file_id = data.get("last_sticker_file_id")
-    sticker_msg_id = data.get("last_sticker_msg_id")
-    
-    try:
-        await bot.edit_message_reply_markup(message.chat.id, sticker_msg_id, reply_markup=None)
-    except:
-        pass
-        
-    caption = message.text
-    responses.append({
-        "type": "sticker",
-        "sticker_file_id": sticker_file_id,
-        "caption": caption
-    })
-    
-    await state.update_data(responses=responses)
-    await state.set_state(BotStates.waiting_for_multi_responses)
-    
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="نعم", callback_data="add_more_yes"), InlineKeyboardButton(text="لا", callback_data="add_more_no")]
-    ])
-    await message.reply("¹# - هل تود اضافة المزيد من الردود لهذا الرد\nانقر على زر نعم او لا", reply_markup=markup)
-
-@dp.callback_query(F.data == "add_more_yes", BotStates.waiting_for_multi_responses)
-async def add_more_yes_handler(query: CallbackQuery):
-    markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="عودة", callback_data="return_to_prompt")]])
-    await query.message.edit_text("¹# - اضف الرد اللذي تريده ان يدعم\nهذا الرد ايضا", reply_markup=markup)
-
-@dp.callback_query(F.data == "return_to_prompt", BotStates.waiting_for_multi_responses)
-async def return_to_prompt_handler(query: CallbackQuery):
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="نعم", callback_data="add_more_yes"), InlineKeyboardButton(text="لا", callback_data="add_more_no")]
-    ])
-    await query.message.edit_text("¹# - هل تود اضافة المزيد من الردود لهذا الرد\nانقر على زر نعم او لا", reply_markup=markup)
-
-@dp.callback_query(F.data == "add_more_no", BotStates.waiting_for_multi_responses)
-async def add_more_no_handler(query: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    chat_id = query.message.chat.id
-    
-    if chat_id not in custom_replies:
-        custom_replies[chat_id] = []
-        
-    custom_replies[chat_id].append({
-        "trigger": data.get("trigger"),
-        "is_everywhere": data.get("is_everywhere"),
-        "is_start": data.get("is_start"),
-        "is_protected": data.get("is_protected"),
-        "responses": data.get("responses"),
-        "type": data.get("mode"),
-        "is_sticker_only": False
-    })
-    
-    await state.clear()
-    await query.message.edit_text(f"¹# - الرد المضاف هو {data.get('trigger')}\nتدلل يبعدي", reply_markup=None)
+    asyncio.create_task(trigger_random_reaction(message.chat.id, message.message_id, message))
+    asyncio.create_task(trigger_random_reaction(message.chat.id, animated_msg.message_id, animated_msg))
 
 @dp.callback_query(F.data == "cancel")
 async def cancel_handler(query: CallbackQuery, state: FSMContext):
     await state.clear()
     await query.message.delete()
-    await bot.send_message(query.message.chat.id, get_next_emoji(), reply_markup=get_dynamic_developer_button())
+    sent_msg = await bot.send_message(query.message.chat.id, get_next_emoji(), reply_markup=get_dynamic_developer_button())
+    asyncio.create_task(trigger_random_reaction(query.message.chat.id, sent_msg.message_id, sent_msg))
 
 @dp.callback_query(F.data == "lang_mode")
 async def lang_mode_handler(query: CallbackQuery, state: FSMContext):
@@ -534,7 +609,8 @@ async def set_lang_handler(query: CallbackQuery):
     user_settings[query.from_user.id]['lang'] = lang
     await query.message.delete()
     lang_str = "الروسية" if lang == "ru" else "الانكليزية"
-    await bot.send_message(query.message.chat.id, f"تم تبديل لغة وضع اللغات الى\nذكر اللغة {lang_str}", reply_markup=get_dynamic_developer_button())
+    sent_msg = await bot.send_message(query.message.chat.id, f"تم تبديل لغة وضع اللغات الى\nذكر اللغة {lang_str}", reply_markup=get_dynamic_developer_button())
+    asyncio.create_task(trigger_random_reaction(query.message.chat.id, sent_msg.message_id, sent_msg))
 
 @dp.message(F.text.startswith("يوت "))
 async def youtube_download_router(message: Message):
@@ -547,7 +623,7 @@ async def youtube_download_router(message: Message):
         
     job = DownloadJob(message, query)
     await download_queue.put(job)
-    asyncio.create_task(trigger_random_reaction(message.chat.id, message.message_id))
+    asyncio.create_task(trigger_random_reaction(message.chat.id, message.message_id, message))
 
 @dp.message(BotStates.waiting_for_lang_input)
 async def lang_input_handler(message: Message):
@@ -560,85 +636,80 @@ async def lang_input_handler(message: Message):
     
     if has_ar and not has_other:
         trans = translator.translate(text, dest=lang).text
-        await send_animated(message.chat.id, format_text(trans, lang), include_dev_btn=True)
+        animated_msg = await send_animated(message.chat.id, format_text(trans, lang), include_dev_btn=True)
     elif has_other:
-        await send_animated(message.chat.id, format_text(text, lang), include_dev_btn=True)
+        animated_msg = await send_animated(message.chat.id, format_text(text, lang), include_dev_btn=True)
     else:
         trans = translator.translate(text, dest=lang).text
-        await send_animated(message.chat.id, format_text(trans, lang), include_dev_btn=True)
+        animated_msg = await send_animated(message.chat.id, format_text(trans, lang), include_dev_btn=True)
         
-    asyncio.create_task(trigger_random_reaction(message.chat.id, message.message_id))
+    asyncio.create_task(trigger_random_reaction(message.chat.id, message.message_id, message))
+    asyncio.create_task(trigger_random_reaction(message.chat.id, animated_msg.message_id, animated_msg))
 
 @dp.message()
 async def global_handler(message: Message):
     if message.chat.type in ["group", "supergroup", "channel"] and message.chat.id not in enabled_chats:
         return
-        
+
     chat_id = message.chat.id
     text = message.text
     
     if text:
-        replies = custom_replies.get(chat_id, [])
+        replies = chat_replies.get(chat_id, {})
         matched_reply = None
         
-        for r in replies:
-            trigger = r["trigger"]
-            if r["is_everywhere"]:
-                if trigger in text:
-                    matched_reply = r
-                    break
-            elif r["is_start"]:
-                if text.startswith(trigger):
-                    matched_reply = r
-                    break
-            else:
-                if text.strip() == trigger:
-                    matched_reply = r
-                    break
-                    
+        for trigger, meta in replies.items():
+            if meta["is_anywhere"] and trigger in text:
+                matched_reply = meta
+                break
+            elif meta["is_start"] and text.startswith(trigger):
+                matched_reply = meta
+                break
+            elif not meta["is_anywhere"] and not meta["is_start"] and text == trigger:
+                matched_reply = meta
+                break
+                
         if matched_reply:
-            delay = reply_delay.get(chat_id, 0.1)
+            pool = matched_reply["pool"]
+            last_indices = matched_reply["last_indices"]
+            
+            available_indices = [idx for idx in range(len(pool)) if idx not in last_indices]
+            if not available_indices:
+                available_indices = list(range(len(pool)))
+                
+            chosen_idx = random.choice(available_indices)
+            last_indices.append(chosen_idx)
+            if len(last_indices) > 2:
+                last_indices.pop(0)
+                
+            reply_item = pool[chosen_idx]
+            delay = chat_delays.get(chat_id, 0.1)
+            
             await asyncio.sleep(delay)
             
-            if matched_reply["is_sticker_only"]:
-                await message.reply_sticker(matched_reply["sticker_file_id"])
-                return
-                
-            responses = matched_reply["responses"]
-            if responses:
-                key = f"{chat_id}_{matched_reply['trigger']}"
-                history = last_sent_response.get(key, [])
-                
-                available = [res for res in responses if res not in history]
-                if not available:
-                    available = responses
-                    history = []
-                
-                chosen = random.choice(available)
-                history.append(chosen)
-                if len(history) > 2:
-                    history.pop(0)
-                last_sent_response[key] = history
-                
-                protect = matched_reply["is_protected"]
-                
-                if chosen["type"] == "text":
-                    await message.reply(chosen["content"], protect_content=protect)
-                elif chosen["type"] == "sticker":
-                    if chosen.get("caption"):
-                        await message.reply_sticker(chosen["sticker_file_id"])
-                        await message.reply(chosen["caption"], protect_content=protect)
-                    else:
-                        await message.reply_sticker(chosen["sticker_file_id"])
+            if reply_item["type"] == "text":
+                sent_reply = await message.reply(reply_item["content"])
+                asyncio.create_task(trigger_random_reaction(chat_id, sent_reply.message_id, sent_reply))
+            elif reply_item["type"] == "sticker":
+                if reply_item.get("caption"):
+                    sent_sticker = await message.reply_sticker(reply_item["file_id"])
+                    await asyncio.sleep(delay)
+                    sent_caption = await message.reply(reply_item["caption"])
+                    asyncio.create_task(trigger_random_reaction(chat_id, sent_sticker.message_id, sent_sticker))
+                    asyncio.create_task(trigger_random_reaction(chat_id, sent_caption.message_id, sent_caption))
+                else:
+                    sent_sticker = await message.reply_sticker(reply_item["file_id"])
+                    asyncio.create_task(trigger_random_reaction(chat_id, sent_sticker.message_id, sent_sticker))
             return
 
     if message.text and not message.text.startswith("يوت ") and message.text != "ادت":
-        await send_animated(
+        animated_msg = await send_animated(
             message.chat.id, 
             "اهلين وياك بوت اليوتيوب تريد اغنيتك\nكول يوت ومن ثم اذكر العنوان", 
             include_dev_btn=True
         )
-        asyncio.create_task(trigger_random_reaction(message.chat.id, message.message_id))
+        asyncio.create_task(trigger_random_reaction(message.chat.id, message.message_id, message))
+        asyncio.create_task(trigger_random_reaction(message.chat.id, animated_msg.message_id, animated_msg))
 
 async def main():
     for _ in range(2):
@@ -647,3 +718,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
