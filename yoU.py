@@ -64,20 +64,27 @@ def format_text(text, lang='en'):
     return text
 
 async def type_text(message: Message, text: str):
-    words = text.split()
-    current_text = ""
-    for i in range(0, len(words), 3):
-        chunk = " ".join(words[i:i+3])
-        if current_text:
-            current_text += " " + chunk
-        else:
-            current_text = chunk
-        try:
-            await message.edit_text(current_text)
-            await asyncio.sleep(0.3)
-        except:
-            pass
-    return current_text
+    lines = text.split("\n")
+    line_words = [line.split() for line in lines]
+    max_words = max(len(words) for words in line_words) if line_words else 0
+    
+    for word_idx in range(0, max_words, 3):
+        current_lines = []
+        for words in line_words:
+            chunk = " ".join(words[:word_idx + 3])
+            if chunk:
+                current_lines.append(chunk)
+            else:
+                current_lines.append("")
+        
+        step_text = "\n".join(current_lines).strip()
+        if step_text:
+            try:
+                await message.edit_text(step_text)
+                await asyncio.sleep(0.3)
+            except:
+                pass
+    return text
 
 def get_next_emoji():
     global emoji_index
@@ -100,7 +107,14 @@ def get_dynamic_developer_button():
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=text, url=url, style=style)]])
 
 async def send_animated(chat_id: int, text: str, include_dev_btn: bool = False):
-    msg = await bot.send_message(chat_id, ".")
+    first_word = ""
+    lines = text.split("\n")
+    if lines and lines[0].split():
+        first_word = lines[0].split()[0]
+    else:
+        first_word = "..."
+        
+    msg = await bot.send_message(chat_id, first_word)
     final = await type_text(msg, text)
     reply_markup = get_dynamic_developer_button() if include_dev_btn else None
     try:
@@ -192,7 +206,7 @@ async def fast_reply_add(message: Message, state: FSMContext):
         return
     
     cmd_part = "اضف رد " if message.text.startswith("اضف رد ") else "رد "
-    trigger_part = message.text.replace(cmd_part, "").strip()
+    trigger_part = message.text[len(cmd_part):].strip()
     
     lines = trigger_part.split("\n", 1)
     if len(lines) < 2:
@@ -648,6 +662,18 @@ async def lang_input_handler(message: Message):
 
 @dp.message()
 async def global_handler(message: Message):
+    if message.text:
+        is_add_reply = message.text.startswith("رد ") or message.text.startswith("اضف رد ")
+        is_main_reply = message.text in ["رد", "اضف رد"]
+        
+        if is_main_reply:
+            await add_reply_command(message, dp.fsm.resolve_context(bot, message.chat.id, message.from_user.id))
+            return
+            
+        if is_add_reply:
+            await fast_reply_add(message, dp.fsm.resolve_context(bot, message.chat.id, message.from_user.id))
+            return
+
     if message.chat.type in ["group", "supergroup", "channel"] and message.chat.id not in enabled_chats:
         return
 
@@ -718,4 +744,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
