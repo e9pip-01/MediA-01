@@ -106,6 +106,16 @@ def get_dynamic_developer_button():
     button_toggle = not button_toggle
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=text, url=url)]])
 
+def get_edit_keyboard(is_active: bool):
+    style = "destructive" if is_active else "primary"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="وضع اللغات", callback_data="toggle_lang_mode", style=style),
+            InlineKeyboardButton(text="تبديل اللغة", callback_data="switch_lang", style=style)
+        ],
+        [InlineKeyboardButton(text="مسح", callback_data="delete_edit_panel", style="destructive")]
+    ])
+
 async def send_animated(message: Message, text: str, include_dev_btn: bool = False, is_edit_cmd: bool = False, state: FSMContext = None):
     first_word = ""
     lines = text.split("\n")
@@ -123,15 +133,7 @@ async def send_animated(message: Message, text: str, include_dev_btn: bool = Fal
     elif is_edit_cmd and state:
         user_data = await state.get_data()
         is_active = user_data.get("lang_mode_active", False)
-        style = "destructive" if is_active else "primary"
-        
-        reply_markup = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="وضع اللغات", callback_data="toggle_lang_mode", style=style),
-                InlineKeyboardButton(text="تبديل اللغة", callback_data="switch_lang", style=style)
-            ],
-            [InlineKeyboardButton(text="مسح", callback_data="delete_edit_panel", style="destructive")]
-        ])
+        reply_markup = get_edit_keyboard(is_active)
         
     try:
         await msg.edit_text(final, reply_markup=reply_markup)
@@ -701,15 +703,7 @@ async def toggle_lang_mode_callback(query: CallbackQuery, state: FSMContext):
         await state.clear()
         await query.answer("تم تعطيل وضع اللغات\nالوضع ❌", show_alert=True)
         
-    style = "destructive" if is_active else "primary"
-    reply_markup = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="وضع اللغات", callback_data="toggle_lang_mode", style=style),
-            InlineKeyboardButton(text="تبديل اللغة", callback_data="switch_lang", style=style)
-        ],
-        [InlineKeyboardButton(text="مسح", callback_data="delete_edit_panel", style="destructive")]
-    ])
-    
+    reply_markup = get_edit_keyboard(is_active)
     try:
         await query.message.edit_reply_markup(reply_markup=reply_markup)
     except:
@@ -741,15 +735,7 @@ async def set_lang_handler(query: CallbackQuery, state: FSMContext):
     
     user_data = await state.get_data()
     is_active = user_data.get("lang_mode_active", False)
-    style = "destructive" if is_active else "primary"
-    
-    reply_markup = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="وضع اللغات", callback_data="toggle_lang_mode", style=style),
-            InlineKeyboardButton(text="تبديل اللغة", callback_data="switch_lang", style=style)
-        ],
-        [InlineKeyboardButton(text="مسح", callback_data="delete_edit_panel", style="destructive")]
-    ])
+    reply_markup = get_edit_keyboard(is_active)
     try:
         await query.message.edit_reply_markup(reply_markup=reply_markup)
     except:
@@ -758,9 +744,9 @@ async def set_lang_handler(query: CallbackQuery, state: FSMContext):
     lang_str = "الروسية" if lang == "ru" else "الانكليزية"
     await query.answer(f"تم تبديل اللغة إلى {lang_str}", show_alert=True)
 
-@dp.message(F.text.startswith("يوت "))
+@dp.message(F.chat.type in ["group", "supergroup", "channel"], F.text.startswith("يوت "))
 async def youtube_download_router(message: Message):
-    if message.chat.type in ["group", "supergroup", "channel"] and message.chat.id not in enabled_chats:
+    if message.chat.id not in enabled_chats:
         return
     
     query = message.text.replace("يوت ", "")
@@ -791,6 +777,42 @@ async def lang_input_handler(message: Message):
         
     asyncio.create_task(trigger_random_reaction(message.chat.id, message.message_id, message))
     asyncio.create_task(trigger_random_reaction(message.chat.id, animated_msg.message_id, animated_msg))
+
+@dp.edited_message(F.chat.type == "private")
+async def edited_message_handler(edited_message: Message, state: FSMContext):
+    if not edited_message.text:
+        return
+        
+    user_data = await state.get_data()
+    is_active = user_data.get("lang_mode_active", False)
+    lang = user_settings.get(edited_message.from_user.id, {}).get('lang', 'en')
+    
+    text = edited_message.text
+    has_ar = bool(re.search(r'[\u0600-\u06FF]', text))
+    has_other = bool(re.search(r'[a-zA-Zа-яА-Я]', text))
+    
+    if has_ar and not has_other:
+        trans = translator.translate(text, dest=lang).text
+        processed_text = format_text(trans, lang)
+    elif has_other:
+        processed_text = format_text(text, lang)
+    else:
+        trans = translator.translate(text, dest=lang).text
+        processed_text = format_text(trans, lang)
+        
+    reply_markup = get_edit_keyboard(is_active)
+    
+    msg = await edited_message.reply("...")
+    final = await type_text(msg, processed_text)
+    
+    try:
+        await msg.edit_text(final, reply_markup=reply_markup)
+    except:
+        pass
+        
+    await register_edit_panel(edited_message.chat.id, msg.message_id, edited_message.message_id)
+    asyncio.create_task(trigger_random_reaction(edited_message.chat.id, edited_message.message_id, edited_message))
+    asyncio.create_task(trigger_random_reaction(edited_message.chat.id, msg.message_id, msg))
 
 @dp.message()
 async def global_handler(message: Message):
