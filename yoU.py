@@ -50,9 +50,12 @@ class BotStates(StatesGroup):
 
 def clean_temp_files():
     temp_dir = "temp_downloads"
-    if os.path.exists(temp_dir):
-        shutil.rmtree(temp_dir)
-    os.makedirs(temp_dir, exist_ok=True)
+    try:
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
+        os.makedirs(temp_dir, exist_ok=True)
+    except Exception:
+        pass
 
 def filter_title(text):
     return "".join([c for c in text if c.isalnum() or c in [" ", "-", "&"]])
@@ -361,12 +364,29 @@ async def lang_mode_toggle_handler(callback_query: types.CallbackQuery, state: F
 async def switch_language_handler(callback_query: types.CallbackQuery):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="انكليزية  🇺🇸", callback_data="set_lang_en", style="success"),
-            InlineKeyboardButton(text="روسية  🇷🇺", callback_data="set_lang_ru", style="success")
+            InlineKeyboardButton(text="eNG 🇺🇲", callback_data="set_lang_en", style="success"),
+            InlineKeyboardButton(text="rUs 🇷🇺", callback_data="set_lang_ru", style="success")
+        ],
+        [
+            InlineKeyboardButton(text="عودة", callback_data="back_to_edit_panel", style="primary")
         ]
     ])
     try:
         await callback_query.message.edit_text("تغيير اللغة", reply_markup=keyboard)
+    except Exception:
+        pass
+    await callback_query.answer()
+
+@dp.callback_query(F.data == "back_to_edit_panel")
+async def back_to_edit_panel_handler(callback_query: types.CallbackQuery, state: FSMContext):
+    current_state = await state.get_state()
+    is_active = (current_state == BotStates.waiting_for_lang_mode.state)
+    
+    try:
+        await callback_query.message.edit_text(
+            "تريد تغير لغة وضع اللغات دوس ع الزر الفوك يسار\nتريد تفعل وضع اللغات دوس ع الزر الفوك يمين",
+            reply_markup=get_edit_keyboard(is_active=is_active)
+        )
     except Exception:
         pass
     await callback_query.answer()
@@ -380,26 +400,17 @@ async def set_lang_callback(callback_query: types.CallbackQuery, state: FSMConte
     lang_name = name_map.get(lang_code, "الانكليزية")
     user_settings[user_id] = lang_code
     
+    current_state = await state.get_state()
+    is_active = (current_state == BotStates.waiting_for_lang_mode.state)
+    
     try:
-        await callback_query.message.delete()
+        await callback_query.message.edit_text(
+            f"تم تبديل لغة وضع اللغات الى\n{lang_name}",
+            reply_markup=get_edit_keyboard(is_active=is_active)
+        )
     except Exception:
         pass
         
-    reply_msg = await bot.send_message(
-        chat_id=callback_query.message.chat.id, 
-        text="تغيير لغة وضع اللغات",
-        reply_to_message_id=callback_query.message.reply_to_message.message_id if callback_query.message.reply_to_message else None
-    )
-    asyncio.create_task(handle_random_reaction(reply_msg.chat.id, reply_msg.message_id, is_bot_message=True))
-    
-    target_text = f"تم تبديل لغة وضع اللغات الى\n{lang_name}"
-    await simulate_parallel_typing(reply_msg, target_text)
-    
-    current_state = await state.get_state()
-    is_active = (current_state == BotStates.waiting_for_lang_mode.state)
-    await reply_msg.edit_reply_markup(reply_markup=get_edit_keyboard(is_active=is_active))
-    
-    await track_and_clean_edit_messages(callback_query.message.chat.id, user_id, reply_msg.message_id)
     await callback_query.answer()
 
 @dp.message(BotStates.waiting_for_lang_mode, F.chat.type == "private")
@@ -457,42 +468,14 @@ async def lang_mode_processing(message: types.Message):
     asyncio.create_task(handle_random_reaction(reply_msg.chat.id, reply_msg.message_id, is_bot_message=True))
     await simulate_parallel_typing(reply_msg, result_text)
 
-class ProgressTracker:
-    def __init__(self, bot, message, query):
-        self.bot = bot
-        self.message = message
-        self.query = query
-        self.last_reported_step = 0
-
-    def progress_hook(self, d):
-        if d["status"] == "downloading":
-            total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
-            downloaded = d.get("downloaded_bytes", 0)
-            if total > 0:
-                percentage = int((downloaded / total) * 100)
-                next_step = (percentage // 25) * 25
-                if next_step > self.last_reported_step and next_step <= 100:
-                    self.last_reported_step = next_step
-                    asyncio.run_coroutine_threadsafe(
-                        update_percentage(self.message, next_step),
-                        asyncio.get_event_loop()
-                    )
-
 async def process_youtube_job(message: types.Message, query: str):
-    info_msg_text = f"بدءت بالعثور ع\n{query}\nاه انتظر دادي بليز"
+    info_msg_text = f"بدءت بالعثور ع\n{query} انتظر دادي بليز"
     
     status_msg = await message.reply("بدء")
     asyncio.create_task(handle_random_reaction(status_msg.chat.id, status_msg.message_id, is_bot_message=True))
     await simulate_parallel_typing(status_msg, info_msg_text)
     
-    percent_msg = await status_msg.reply("0%")
-    asyncio.create_task(handle_random_reaction(percent_msg.chat.id, percent_msg.message_id, is_bot_message=True))
-    
     if query in file_cache:
-        for percent in range(25, 101, 25):
-            await update_percentage(percent_msg, percent)
-            await asyncio.sleep(0.1)
-        
         cached_file_path = file_cache[query]
         if os.path.exists(cached_file_path):
             try:
@@ -511,10 +494,6 @@ async def process_youtube_job(message: types.Message, query: str):
                 )
                 
                 try:
-                    await percent_msg.delete()
-                except Exception:
-                    pass
-                try:
                     await status_msg.delete()
                 except Exception:
                     pass
@@ -524,14 +503,12 @@ async def process_youtube_job(message: types.Message, query: str):
 
     clean_temp_files()
     temp_dir = "temp_downloads"
-    tracker = ProgressTracker(bot, percent_msg, query)
     
     ydl_opts = {
         "format": "bestaudio/best",
         "outtmpl": os.path.join(temp_dir, "%(id)s.%(ext)s"),
         "noplaylist": True,
         "quiet": True,
-        "progress_hooks": [tracker.progress_hook],
     }
     
     try:
@@ -546,8 +523,14 @@ async def process_youtube_job(message: types.Message, query: str):
                 raise Exception("No results found")
                 
             video_info = info_dict["entries"][0]
-            title = video_info.get("title", "Audio")
-            uploader = video_info.get("uploader", "")
+            
+            title = video_info.get("title")
+            if not title:
+                title = "".join([str(random.randint(0, 9)) for _ in range(9)])
+                
+            uploader = video_info.get("uploader")
+            if not uploader:
+                uploader = "ANoNyMoUs"
             
             downloaded_file_path = None
             for file_name in os.listdir(temp_dir):
@@ -566,9 +549,6 @@ async def process_youtube_job(message: types.Message, query: str):
             detected_ext = mimetypes.guess_extension(mime_type) or ".mp3"
             if detected_ext.startswith("."):
                 detected_ext = detected_ext[1:]
-
-            if tracker.last_reported_step < 75:
-                await update_percentage(percent_msg, 75)
             
             if contains_arabic(title):
                 title = translate_text(title, "en")
@@ -576,15 +556,10 @@ async def process_youtube_job(message: types.Message, query: str):
                 uploader = translate_text(uploader, "en")
                 
             processed_title = apply_casing_rules(filter_title(title))
-            processed_uploader = apply_casing_rules(filter_channel(uploader)) if uploader else ""
+            processed_uploader = apply_casing_rules(filter_channel(uploader))
             
-            if processed_uploader:
-                final_filename = f"{processed_uploader} - {processed_title}.{detected_ext}"
-            else:
-                final_filename = f"{processed_title}.{detected_ext}"
+            final_filename = f"{processed_uploader} - {processed_title}.{detected_ext}"
                 
-            await update_percentage(percent_msg, 100)
-            
             success_text = "اكتمل اليوت وتم ارفق اغنيتك بالشات\nماعليك سوى الاستماع لها"
             await status_msg.edit_text("اكتمل")
             await simulate_parallel_typing(status_msg, success_text)
@@ -604,10 +579,6 @@ async def process_youtube_job(message: types.Message, query: str):
             file_cache[query] = final_saved_path
             
             try:
-                await percent_msg.delete()
-            except Exception:
-                pass
-            try:
                 await status_msg.delete()
             except Exception:
                 pass
@@ -615,9 +586,7 @@ async def process_youtube_job(message: types.Message, query: str):
     except Exception:
         fail_text = "الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي"
         try:
-            await status_msg.edit_text("فشل")
             await simulate_parallel_typing(status_msg, fail_text)
-            await percent_msg.delete()
         except Exception:
             pass
 
@@ -684,13 +653,6 @@ async def youtube_download_dispatcher(message: types.Message):
     if user_active_jobs[user_id] < 2:
         asyncio.create_task(manage_user_queue(user_id))
 
-async def update_percentage(message: types.Message, percentage: int):
-    temp_text = f"{percentage}%"
-    try:
-        await message.edit_text(temp_text)
-    except Exception:
-        pass
-
 @dp.message()
 async def general_message_handler(message: types.Message):
     is_private = message.chat.type == "private"
@@ -715,8 +677,6 @@ async def general_message_handler(message: types.Message):
                 await sent_msg.edit_reply_markup(reply_markup=kb)
             except Exception:
                 pass
-            
-            await send_tracked_emoji(message.chat.id, reply_to_id=sent_msg.message_id)
 
 async def on_startup():
     clean_temp_files()
