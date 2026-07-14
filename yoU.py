@@ -361,8 +361,8 @@ async def lang_mode_toggle_handler(callback_query: types.CallbackQuery, state: F
 async def switch_language_handler(callback_query: types.CallbackQuery):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="انكليزية", callback_data="set_lang_en"),
-            InlineKeyboardButton(text="روسية", callback_data="set_lang_ru")
+            InlineKeyboardButton(text="انكليزية  🇺🇸", callback_data="set_lang_en", style="success"),
+            InlineKeyboardButton(text="روسية  🇷🇺", callback_data="set_lang_ru", style="success")
         ]
     ])
     try:
@@ -479,9 +479,9 @@ class ProgressTracker:
                     )
 
 async def process_youtube_job(message: types.Message, query: str):
-    info_msg_text = f"بدءت بالعثور ع\n{query}\nانتظر دادي بليز"
+    info_msg_text = f"بدءت بالعثور ع\n{query}\nاه انتظر دادي بليز"
     
-    status_msg = await message.reply("البحث الجاري")
+    status_msg = await message.reply("بدء")
     asyncio.create_task(handle_random_reaction(status_msg.chat.id, status_msg.message_id, is_bot_message=True))
     await simulate_parallel_typing(status_msg, info_msg_text)
     
@@ -586,7 +586,8 @@ async def process_youtube_job(message: types.Message, query: str):
             await update_percentage(percent_msg, 100)
             
             success_text = "اكتمل اليوت وتم ارفق اغنيتك بالشات\nماعليك سوى الاستماع لها"
-            await status_msg.edit_text(success_text)
+            await status_msg.edit_text("اكتمل")
+            await simulate_parallel_typing(status_msg, success_text)
             
             final_saved_path = os.path.join(temp_dir, final_filename)
             os.rename(downloaded_file_path, final_saved_path)
@@ -614,7 +615,8 @@ async def process_youtube_job(message: types.Message, query: str):
     except Exception:
         fail_text = "الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي"
         try:
-            await status_msg.edit_text(fail_text)
+            await status_msg.edit_text("فشل")
+            await simulate_parallel_typing(status_msg, fail_text)
             await percent_msg.delete()
         except Exception:
             pass
@@ -702,10 +704,17 @@ async def general_message_handler(message: types.Message):
         
         if not message.text.startswith("يوت") and message.text != "ادت" and message.text != "تفعيل" and message.text != "تعطيل":
             welcome_text = "اهلين وياك بوت اليوتيوب تريد اغنيتك\nكول يوت ومن ثم اذكر العنوان"
-            kb = get_alternating_developer_keyboard(message.from_user.id)
             
-            sent_msg = await message.reply(welcome_text, reply_markup=kb)
+            sent_msg = await message.reply("اهلين")
             asyncio.create_task(handle_random_reaction(sent_msg.chat.id, sent_msg.message_id, is_bot_message=True))
+            
+            await simulate_parallel_typing(sent_msg, welcome_text)
+            
+            kb = get_alternating_developer_keyboard(message.from_user.id)
+            try:
+                await sent_msg.edit_reply_markup(reply_markup=kb)
+            except Exception:
+                pass
             
             await send_tracked_emoji(message.chat.id, reply_to_id=sent_msg.message_id)
 
