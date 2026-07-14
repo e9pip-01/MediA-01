@@ -8,3 +8,5 @@ httpx
 orjson
 brotli
 certifi
+dnspython
+deep-translator
