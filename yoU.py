@@ -110,58 +110,79 @@ def clear_system_cache(temp_file_list=None):
     
     gc.collect()
 
-def split_line_into_chunks(line):
-    words = line.split()
-    if not words:
-        return []
-    chunks = []
-    i = 0
-    pattern = [4, 2, 3]
-    pattern_idx = 0
-    while i < len(words):
-        take = pattern[pattern_idx]
-        chunks.append(" ".join(words[i:i+take]))
-        i += take
-        pattern_idx = (pattern_idx + 1) % len(pattern)
-    return chunks
+def split_text_into_chunks(text):
+    lines = text.split("\n")
+    all_lines_chunks = []
+    max_chunks_count = 0
+    
+    for line in lines:
+        words = line.split()
+        if not words:
+            all_lines_chunks.append([])
+            continue
+            
+        chunks = []
+        i = 0
+        pattern = [3, 2, 4]
+        pattern_idx = 0
+        while i < len(words):
+            take = pattern[pattern_idx]
+            chunks.append(" ".join(words[i:i+take]))
+            i += take
+            pattern_idx = (pattern_idx + 1) % len(pattern)
+            
+        all_lines_chunks.append(chunks)
+        if len(chunks) > max_chunks_count:
+            max_chunks_count = len(chunks)
+            
+    return all_lines_chunks, max_chunks_count
 
 async def send_animated_text(chat_id, text, reply_to_message_id=None, reply_markup=None):
-    lines = text.split('\n')
-    lines_chunks = [split_line_into_chunks(line) for line in lines]
-    max_steps = max((len(chunks) for chunks in lines_chunks), default=0)
+    all_lines_chunks, max_steps = split_text_into_chunks(text)
+    
+    if max_steps == 0:
+        msg = await bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            reply_to_message_id=reply_to_message_id,
+            reply_markup=reply_markup
+        )
+        return msg
 
     message = None
     first_step_done = False
 
     for step in range(max_steps):
-        current_lines = []
-        for chunks in lines_chunks:
-            take_count = min(step + 1, len(chunks))
-            current_lines.append(" ".join(chunks[:take_count]))
+        current_lines_state = []
+        for chunks in all_lines_chunks:
+            if not chunks:
+                current_lines_state.append("")
+                continue
+            visible_chunks = chunks[:step + 1]
+            current_lines_state.append(" ".join(visible_chunks))
+            
+        current_text = "\n".join(current_lines_state)
         
-        frame_text = "\n".join(current_lines)
-
         if message is None:
             message = await bot.send_message(
                 chat_id=chat_id,
-                text=frame_text,
+                text=current_text,
                 reply_to_message_id=reply_to_message_id
             )
             asyncio.create_task(handle_reaction(message, bot.id, is_bot=True))
         else:
-            await message.edit_text(frame_text)
-        
+            await message.edit_text(current_text)
+            
         if not first_step_done:
             first_step_done = True
             asyncio.create_task(send_delayed_emoji(chat_id, message.message_id))
-
+            
         await asyncio.sleep(0.3)
-    
-    final_text = "\n".join([" ".join(chunks) for chunks in lines_chunks])
+        
     if reply_markup:
-        await message.edit_text(final_text, reply_markup=reply_markup)
+        await message.edit_text(text, reply_markup=reply_markup)
     else:
-        await message.edit_text(final_text)
+        await message.edit_text(text)
         
     return message
 
@@ -178,25 +199,29 @@ async def send_delayed_emoji(chat_id, reply_msg_id):
         pass
 
 async def edit_animated_text(message, text, reply_markup=None):
-    lines = text.split('\n')
-    lines_chunks = [split_line_into_chunks(line) for line in lines]
-    max_steps = max((len(chunks) for chunks in lines_chunks), default=0)
+    all_lines_chunks, max_steps = split_text_into_chunks(text)
+    
+    if max_steps == 0:
+        await message.edit_text(text, reply_markup=reply_markup)
+        return
 
     for step in range(max_steps):
-        current_lines = []
-        for chunks in lines_chunks:
-            take_count = min(step + 1, len(chunks))
-            current_lines.append(" ".join(chunks[:take_count]))
-        
-        frame_text = "\n".join(current_lines)
-        await message.edit_text(frame_text)
+        current_lines_state = []
+        for chunks in all_lines_chunks:
+            if not chunks:
+                current_lines_state.append("")
+                continue
+            visible_chunks = chunks[:step + 1]
+            current_lines_state.append(" ".join(visible_chunks))
+            
+        current_text = "\n".join(current_lines_state)
+        await message.edit_text(current_text)
         await asyncio.sleep(0.3)
-    
-    final_text = "\n".join([" ".join(chunks) for chunks in lines_chunks])
+        
     if reply_markup:
-        await message.edit_text(final_text, reply_markup=reply_markup)
+        await message.edit_text(text, reply_markup=reply_markup)
     else:
-        await message.edit_text(final_text)
+        await message.edit_text(text)
 
 async def handle_reaction(message, user_id, is_owner=False, is_bot=False, chat_type="private"):
     if chat_type in {"group", "supergroup", "channel"}:
