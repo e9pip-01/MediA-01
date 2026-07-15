@@ -40,7 +40,7 @@ user_active_downloads = {}
 active_edit_menus = {}
 
 RANDOM_RESPONSES = [
-    "اهلين وياك بوت mيديا تريد اشتغل \nدز رابط وتدلل",
+    "اهلين وياك بوت ميديا تريد اشتغل \nدز رابط وتدلل",
     "مو ناوي تدلعني مثل البوتات\nترى ازعل منك اصيح المولاي يغصص بلاعيمك",
     "راح اكلك شعر يهبل كتبته بماي كسي\nراح اونسك بس اسمع",
     "من اشوف زبك يسعبل كسي وتذوب الروح انزل\nالعيرك ذليلة امصة ولباسي مشلوح",
@@ -240,9 +240,9 @@ def build_edit_keyboard(lang_mode_active: bool = False):
     ]
     return types.InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def build_switch_lang_keyboard(selected_lang: str = None):
-    color_en = "danger" if selected_lang == "en" else "primary"
-    color_ru = "danger" if selected_lang == "ru" else "primary"
+def build_switch_keyboard(current_lang: str = "en"):
+    color_en = "danger" if current_lang == "en" else "primary"
+    color_ru = "danger" if current_lang == "ru" else "primary"
     
     buttons = [
         [
@@ -300,8 +300,10 @@ async def cmd_edit(message: types.Message, state: FSMContext):
     is_active = current_state == BotStates.lang_mode.state
     
     text_reply = (
-        "تريد تغير لغة وضع اللغات دوس ع الزر الفوك يسار\n"
-        "تريد تفعل وضع اللغات دوس ع الزر الفوك يمين"
+        "تريد تغير لغة وضع اللغات\n"
+        "دوس ع الزر الفوك يسار\n"
+        "تريد تفعل وضع اللغات\n"
+        "دوس ع الزر الفوك يمين"
     )
     
     keyboard = build_edit_keyboard(lang_mode_active=is_active)
@@ -370,14 +372,14 @@ async def cb_lang_mode(callback: types.CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "btn_switch_lang")
 async def cb_switch_lang(callback: types.CallbackQuery, state: FSMContext):
     author_id = callback.from_user.id
-    current_lang = USER_LANGS.get(author_id, "ru")
-    
+    current_lang = USER_LANGS.get(author_id, "en")
+    markup = build_switch_keyboard(current_lang)
     text_reply = (
         "تريد تغير لغة وضع اللغات منا\n"
         "اكو زرين عندك"
     )
-    markup = build_switch_lang_keyboard(selected_lang=current_lang)
     await callback.message.edit_text(text_reply, reply_markup=markup)
+    await callback.answer()
 
 @dp.callback_query(F.data == "btn_back")
 async def cb_back(callback: types.CallbackQuery, state: FSMContext):
@@ -385,11 +387,14 @@ async def cb_back(callback: types.CallbackQuery, state: FSMContext):
     is_active = current_state == BotStates.lang_mode.state
     
     text_reply = (
-        "تريد تغير لغة وضع اللغات دوس ع الزر الفوك يسار\n"
-        "تريد تفعل وضع اللغات دوس ع الزر الفوك يمين"
+        "تريد تغير لغة وضع اللغات\n"
+        "دوس ع الزر الفوك يسار\n"
+        "تريد تفعل وضع اللغات\n"
+        "دوس ع الزر الفوك يمين"
     )
     keyboard = build_edit_keyboard(lang_mode_active=is_active)
     await callback.message.edit_text(text_reply, reply_markup=keyboard)
+    await callback.answer()
 
 @dp.callback_query(F.data.startswith("set_lang_"))
 async def cb_set_lang(callback: types.CallbackQuery, state: FSMContext):
@@ -397,7 +402,7 @@ async def cb_set_lang(callback: types.CallbackQuery, state: FSMContext):
     lang_code = callback.data.split("_")[2]
     USER_LANGS[author_id] = lang_code
     
-    markup = build_switch_lang_keyboard(selected_lang=lang_code)
+    markup = build_switch_keyboard(lang_code)
     try:
         await callback.message.edit_reply_markup(reply_markup=markup)
     except:
@@ -415,7 +420,7 @@ async def process_lang_mode_text(message: types.Message, state: FSMContext):
         return
         
     asyncio.create_task(set_random_reaction(message.chat.id, message.message_id))
-    target_lang = USER_LANGS.get(message.from_user.id, "ru")
+    target_lang = USER_LANGS.get(message.from_user.id, "en")
     
     is_ar = has_arabic(text)
     is_en = has_english(text)
