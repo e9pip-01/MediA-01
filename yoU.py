@@ -23,8 +23,8 @@ RANDOM_RESPONSES = [
     "اهلين وياك بوت ميديا تريد اشتغل \nدز رابط وتدلل",
     "مو ناوي تدلعني مثل البوتات\nترى ازعل منك اصيح المولاي يغصص بلاعيمك",
     "راح اكلك شعر يهبل كتبته بماي كسي\nراح اونسك بس اسمع",
-    "من اشوف زبك يسعبل كسي وتذوب الروح انزل\nالعيرك\n ذليلة امصة ولباسي مشلوح",
-    "انزع لباسي الك وتنيكني يبعد كل طموح شكني\nبعيرك\n وضرطني العافيه ترى فدوة الك اروح"
+    "من اشوف زبك يسعبل كسي وتذوب الروح انزل\nالعيرك ذليلة امصة ولباسي مشلوح",
+    "انزع لباسي الك وتنيكني يبعد كل طموح شكني\nبعيرك وضرطني العافيه ترى فدوة الك اروح"
 ]
 
 async def set_random_reaction(chat_id: int, msg_id: int):
@@ -194,7 +194,7 @@ async def main():
     dev_kb = types.InlineKeyboardMarkup(inline_keyboard=[[types.InlineKeyboardButton(text="رب العالمين", url="tg://user?id=8467593882", style="danger")]])
     for dev_id in DEVELOPER_IDS:
         try: 
-            await send_bot_message(dev_id, "اشتغل البوت مرتلخ تاج راسي\nارضع عيرك\n ؟!", send_food=True, reply_markup=dev_kb)
+            await send_bot_message(dev_id, "اشتغل البوت مرتلخ تاج راسي\nارضع عيرك ؟!", send_food=True, reply_markup=dev_kb)
         except: pass
     await dp.start_polling(bot)
 
