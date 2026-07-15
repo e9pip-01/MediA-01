@@ -7,8 +7,6 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command, CommandStart
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode, ChatMemberStatus
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.fsm.context import FSMContext
 from googletrans import Translator
 import yt_dlp
 
@@ -18,10 +16,6 @@ bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTM
 dp = Dispatcher()
 translator = Translator()
 
-class BotStates(StatesGroup):
-    lang_mode = State()
-
-USER_LANGS = {}
 LAST_REACTIONS = {}
 LAST_REACTION_TIMES = {}
 ACTIVE_GROUPS = set()
@@ -37,7 +31,6 @@ RUSSIAN_UPPER = set("АИБ")
 
 user_queues = {}
 user_active_downloads = {}
-active_edit_menus = {}
 
 RANDOM_RESPONSES = [
     "اهلين وياك بوت ميديا تريد اشتغل \nدز رابط وتدلل",
@@ -95,108 +88,19 @@ async def send_next_food_emoji(chat_id: int, reply_to_msg_id: int):
     msg = await bot.send_message(chat_id=chat_id, text=emoji, reply_to_message_id=reply_to_msg_id)
     asyncio.create_task(set_random_reaction(chat_id, msg.message_id))
 
-def split_text_into_lines_and_chunks(text: str) -> list:
-    lines = text.splitlines()
-    all_lines_chunks = []
-    max_chunks = 0
-    
-    for line in lines:
-        words = line.split()
-        chunks = []
-        i = 0
-        pattern = [3, 2, 3, 1]
-        pattern_idx = 0
-        while i < len(words):
-            take = pattern[pattern_idx % len(pattern)]
-            chunk = " ".join(words[i:i+take])
-            chunks.append(chunk)
-            i += take
-            pattern_idx += 1
-        all_lines_chunks.append(chunks)
-        if len(chunks) > max_chunks:
-            max_chunks = len(chunks)
-            
-    return all_lines_chunks, max_chunks
-
-async def send_animated_text(chat_id: int, text: str, reply_to_id: int = None, send_food: bool = True, reply_markup=None) -> types.Message:
-    all_lines_chunks, max_chunks = split_text_into_lines_and_chunks(text)
-    
-    if max_chunks == 0:
-        msg = await bot.send_message(chat_id=chat_id, text=text, reply_to_message_id=reply_to_id)
-        if send_food:
-            asyncio.create_task(send_next_food_emoji(chat_id, msg.message_id))
-        if reply_markup:
-            try:
-                await msg.edit_reply_markup(reply_markup=reply_markup)
-            except:
-                pass
-        return msg
-
-    current_state_by_line = [""] * len(all_lines_chunks)
-    
-    for step in range(max_chunks):
-        for line_idx, chunks in enumerate(all_lines_chunks):
-            if step < len(chunks):
-                if current_state_by_line[line_idx]:
-                    current_state_by_line[line_idx] += " " + chunks[step]
-                else:
-                    current_state_by_line[line_idx] = chunks[step]
-                    
-        frame_text = "\n".join(current_state_by_line)
-        
-        if step == 0:
-            msg = await bot.send_message(chat_id=chat_id, text=frame_text, reply_to_message_id=reply_to_id)
-            if send_food:
-                asyncio.create_task(send_next_food_emoji(chat_id, msg.message_id))
-        else:
-            await asyncio.sleep(0.3)
-            try:
-                await msg.edit_text(frame_text)
-            except:
-                pass
-                
-    if reply_markup:
-        try:
-            await msg.edit_reply_markup(reply_markup=reply_markup)
-        except:
-            pass
-            
+async def send_bot_message(chat_id: int, text: str, reply_to_id: int = None, send_food: bool = True, reply_markup=None) -> types.Message:
+    msg = await bot.send_message(chat_id=chat_id, text=text, reply_to_message_id=reply_to_id, reply_markup=reply_markup)
+    if send_food:
+        asyncio.create_task(send_next_food_emoji(chat_id, msg.message_id))
     return msg
 
-async def edit_animated_text(msg: types.Message, text: str, send_food: bool = True):
-    all_lines_chunks, max_chunks = split_text_into_lines_and_chunks(text)
-    
-    if max_chunks == 0:
-        try:
-            await msg.edit_text(text)
-        except:
-            pass
-        if send_food:
-            asyncio.create_task(send_next_food_emoji(msg.chat.id, msg.message_id))
-        return
-
-    current_state_by_line = [""] * len(all_lines_chunks)
-    
-    for step in range(max_chunks):
-        for line_idx, chunks in enumerate(all_lines_chunks):
-            if step < len(chunks):
-                if current_state_by_line[line_idx]:
-                    current_state_by_line[line_idx] += " " + chunks[step]
-                else:
-                    current_state_by_line[line_idx] = chunks[step]
-                    
-        frame_text = "\n".join(current_state_by_line)
-        
-        try:
-            await msg.edit_text(frame_text)
-        except:
-            pass
-            
-        if step == 0 and send_food:
-            asyncio.create_task(send_next_food_emoji(msg.chat.id, msg.message_id))
-            
-        if step < max_chunks - 1:
-            await asyncio.sleep(0.3)
+async def edit_bot_message(msg: types.Message, text: str, send_food: bool = True):
+    try:
+        await msg.edit_text(text)
+    except:
+        pass
+    if send_food:
+        asyncio.create_task(send_next_food_emoji(msg.chat.id, msg.message_id))
 
 def format_custom_case(text: str) -> str:
     result = []
@@ -225,34 +129,6 @@ def has_english(text: str) -> bool:
 def has_russian(text: str) -> bool:
     return bool(re.search(r"[\u0400-\u04FF]", text))
 
-def build_edit_keyboard(lang_mode_active: bool = False):
-    color_lang = "danger" if lang_mode_active else "primary"
-    color_switch = "danger" if lang_mode_active else "primary"
-    
-    buttons = [
-        [
-            types.InlineKeyboardButton(text="وضع اللغات", callback_data="btn_lang_mode", style=color_lang),
-            types.InlineKeyboardButton(text="تبديل اللغة", callback_data="btn_switch_lang", style=color_switch)
-        ],
-        [
-            types.InlineKeyboardButton(text="مسح", callback_data="btn_clear", style="danger")
-        ]
-    ]
-    return types.InlineKeyboardMarkup(inline_keyboard=buttons)
-
-def build_switch_keyboard(current_lang: str = "en"):
-    color_en = "danger" if current_lang == "en" else "primary"
-    color_ru = "danger" if current_lang == "ru" else "primary"
-    
-    buttons = [
-        [
-            types.InlineKeyboardButton(text="eNG", callback_data="set_lang_en", style=color_en),
-            types.InlineKeyboardButton(text="rUS", callback_data="set_lang_ru", style=color_ru)
-        ],
-        [types.InlineKeyboardButton(text="عودة", callback_data="btn_back", style="primary")]
-    ]
-    return types.InlineKeyboardMarkup(inline_keyboard=buttons)
-
 async def is_admin_or_owner(message: types.Message) -> bool:
     if message.chat.type == "private":
         return True
@@ -267,7 +143,7 @@ async def cmd_enable_group(message: types.Message):
     if await is_admin_or_owner(message):
         ACTIVE_GROUPS.add(message.chat.id)
         asyncio.create_task(set_random_reaction(message.chat.id, message.message_id))
-        await send_animated_text(
+        await send_bot_message(
             message.chat.id, 
             "تم تفعيل البوت مولاي\nارسل رابط الان", 
             message.message_id, 
@@ -279,7 +155,7 @@ async def cmd_disable_group(message: types.Message):
     if await is_admin_or_owner(message):
         ACTIVE_GROUPS.discard(message.chat.id)
         asyncio.create_task(set_random_reaction(message.chat.id, message.message_id))
-        await send_animated_text(
+        await send_bot_message(
             message.chat.id, 
             "تم تعطيل اليوت مولاي\nارسل رابط الان", 
             message.message_id, 
@@ -291,151 +167,6 @@ async def cmd_start(message: types.Message):
     if message.chat.type != "private":
         return
     await handle_all_text_messages(message)
-
-@dp.message(F.chat.type == "private", F.text == "ادت")
-async def cmd_edit(message: types.Message, state: FSMContext):
-    asyncio.create_task(set_random_reaction(message.chat.id, message.message_id))
-    
-    current_state = await state.get_state()
-    is_active = current_state == BotStates.lang_mode.state
-    
-    text_reply = (
-        "تريد تغير لغة وضع اللغات\n"
-        "دوس ع الزر الفوك يسار\n"
-        "تريد تفعل وضع اللغات\n"
-        "دوس ع الزر الفوك يمين"
-    )
-    
-    keyboard = build_edit_keyboard(lang_mode_active=is_active)
-    msg = await send_animated_text(message.chat.id, text_reply, message.message_id, send_food=True, reply_markup=keyboard)
-    
-    chat_id = message.chat.id
-    if chat_id not in active_edit_menus:
-        active_edit_menus[chat_id] = []
-    
-    active_edit_menus[chat_id].append((msg.message_id, message.message_id))
-    
-    if len(active_edit_menus[chat_id]) > 3:
-        oldest_msg_id, oldest_cmd_id = active_edit_menus[chat_id].pop(0)
-        try:
-            await bot.delete_message(chat_id, oldest_msg_id)
-        except:
-            pass
-
-@dp.callback_query(F.data == "btn_clear")
-async def cb_clear(callback: types.CallbackQuery, state: FSMContext):
-    await state.clear()
-    chat_id = callback.message.chat.id
-    msg_id = callback.message.message_id
-    
-    cmd_id = None
-    if chat_id in active_edit_menus:
-        for idx, (m_id, c_id) in enumerate(active_edit_menus[chat_id]):
-            if m_id == msg_id:
-                cmd_id = c_id
-                active_edit_menus[chat_id].pop(idx)
-                break
-                
-    try:
-        await callback.message.delete()
-    except:
-        pass
-        
-    if cmd_id:
-        try:
-            await bot.delete_message(chat_id, cmd_id)
-        except:
-            pass
-            
-    await callback.answer()
-
-@dp.callback_query(F.data == "btn_lang_mode")
-async def cb_lang_mode(callback: types.CallbackQuery, state: FSMContext):
-    current_state = await state.get_state()
-    if current_state == BotStates.lang_mode.state:
-        await state.clear()
-        keyboard = build_edit_keyboard(lang_mode_active=False)
-        await callback.message.edit_reply_markup(reply_markup=keyboard)
-        await callback.answer(
-            text="تم تعطيل وضع اللغات\nالوضع ❌",
-            show_alert=False
-        )
-    else:
-        await state.set_state(BotStates.lang_mode)
-        keyboard = build_edit_keyboard(lang_mode_active=True)
-        await callback.message.edit_reply_markup(reply_markup=keyboard)
-        await callback.answer(
-            text="تم تفعيل وضع اللغات\nالوضع ✅",
-            show_alert=False
-        )
-
-@dp.callback_query(F.data == "btn_switch_lang")
-async def cb_switch_lang(callback: types.CallbackQuery, state: FSMContext):
-    author_id = callback.from_user.id
-    current_lang = USER_LANGS.get(author_id, "en")
-    markup = build_switch_keyboard(current_lang)
-    text_reply = (
-        "تريد تغير لغة وضع اللغات منا\n"
-        "اكو زرين عندك"
-    )
-    await callback.message.edit_text(text_reply, reply_markup=markup)
-    await callback.answer()
-
-@dp.callback_query(F.data == "btn_back")
-async def cb_back(callback: types.CallbackQuery, state: FSMContext):
-    current_state = await state.get_state()
-    is_active = current_state == BotStates.lang_mode.state
-    
-    text_reply = (
-        "تريد تغير لغة وضع اللغات\n"
-        "دوس ع الزر الفوك يسار\n"
-        "تريد تفعل وضع اللغات\n"
-        "دوس ع الزر الفوك يمين"
-    )
-    keyboard = build_edit_keyboard(lang_mode_active=is_active)
-    await callback.message.edit_text(text_reply, reply_markup=keyboard)
-    await callback.answer()
-
-@dp.callback_query(F.data.startswith("set_lang_"))
-async def cb_set_lang(callback: types.CallbackQuery, state: FSMContext):
-    author_id = callback.from_user.id
-    lang_code = callback.data.split("_")[2]
-    USER_LANGS[author_id] = lang_code
-    
-    markup = build_switch_keyboard(lang_code)
-    try:
-        await callback.message.edit_reply_markup(reply_markup=markup)
-    except:
-        pass
-    await callback.answer()
-
-@dp.message(BotStates.lang_mode, F.text)
-async def process_lang_mode_text(message: types.Message, state: FSMContext):
-    if message.chat.type != "private":
-        return
-    
-    text = message.text
-    if text == "ادت":
-        await cmd_edit(message, state)
-        return
-        
-    asyncio.create_task(set_random_reaction(message.chat.id, message.message_id))
-    target_lang = USER_LANGS.get(message.from_user.id, "en")
-    
-    is_ar = has_arabic(text)
-    is_en = has_english(text)
-    is_ru = has_russian(text)
-    
-    if is_ar and not is_en and not is_ru:
-        result = translate_and_format(text, target_lang)
-    elif (is_en or is_ru) and is_ar:
-        result = format_custom_case(text)
-    elif is_en or is_ru:
-        result = format_custom_case(text)
-    else:
-        result = translate_and_format(text, target_lang)
-        
-    await send_animated_text(message.chat.id, result, message.message_id)
 
 async def worker(user_id: int):
     while True:
@@ -487,45 +218,24 @@ async def process_download(message: types.Message):
 
 async def download_logic(url: str, message: types.Message, is_group: bool):
     base_text = "راح انفذ طلبك مولاي ودامص عيرك العظيم بكل الوضعيات الزانية"
-    status_msg = await send_animated_text(
+    status_msg = await send_bot_message(
         message.chat.id, 
         base_text, 
         message.message_id,
         send_food=not is_group
     )
-    
-    last_reported_progress = [0]
-    
-    def progress_hook(d):
-        if d['status'] == 'downloading':
-            total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
-            downloaded = d.get('downloaded_bytes', 0)
-            if total > 0:
-                percent = int((downloaded / total) * 100)
-                step = (percent // 25) * 25
-                if step > last_reported_progress[0] and step <= 100:
-                    last_reported_progress[0] = step
-                    new_text = f"{base_text} {step}%"
-                    try:
-                        asyncio.run_coroutine_threadsafe(
-                            status_msg.edit_text(new_text),
-                            asyncio.get_event_loop()
-                        )
-                    except:
-                        pass
 
     ydl_opts = {
         'format': 'bestvideo+bestaudio/best',
         'quiet': True,
-        'no_warnings': True,
-        'progress_hooks': [progress_hook]
+        'no_warnings': True
     }
     
     try:
         loop = asyncio.get_event_loop()
         info = await loop.run_in_executor(None, lambda: yt_dlp.YoutubeDL(ydl_opts).extract_info(url, download=False))
     except Exception:
-        await edit_animated_text(status_msg, "الرابط غير مدعوم او الموقع مو مدعوم شم كسي ويصير مدعوم ههع امزح دادي", send_food=not is_group)
+        await edit_bot_message(status_msg, "الرابط غير مدعوم او الموقع مو مدعوم شم كسي ويصير مدعوم ههع امزح دادي", send_food=not is_group)
         return
 
     os.makedirs("downloads", exist_ok=True)
@@ -605,8 +315,7 @@ async def download_logic(url: str, message: types.Message, is_group: bool):
                 'format': fmt_id,
                 'outtmpl': f'downloads/{base_filename}_temp_{idx}.%(ext)s',
                 'quiet': True,
-                'no_warnings': True,
-                'progress_hooks': [progress_hook]
+                'no_warnings': True
             }
             
             try:
@@ -630,7 +339,7 @@ async def download_logic(url: str, message: types.Message, is_group: bool):
             await status_msg.edit_text(base_text)
         except:
             pass
-        await edit_animated_text(status_msg, "الرابط غير مدعوم او الموقع مو مدعوم شم كسي ويصير مدعوم ههع امزح دادي", send_food=not is_group)
+        await edit_bot_message(status_msg, "الرابط غير مدعوم او الموقع مو مدعوم شم كسي ويصير مدعوم ههع امزح دادي", send_food=not is_group)
         return
 
     try:
@@ -673,7 +382,7 @@ async def download_logic(url: str, message: types.Message, is_group: bool):
         success_msg = await message.reply("نيكني استاهل تشكني اطيعك مثل عديمة الكرامة")
         asyncio.create_task(set_random_reaction(message.chat.id, success_msg.message_id))
     except Exception:
-        await edit_animated_text(status_msg, "الرابط غير مدعوم او الموقع مو مدعوم شم كسي ويصير مدعوم ههع امزح دادي", send_food=not is_group)
+        await edit_bot_message(status_msg, "الرابط غير مدعوم او الموقع مو مدعوم شم كسي ويصير مدعوم ههع امزح دادي", send_food=not is_group)
 
 @dp.callback_query(F.data.startswith("gif_"))
 async def cb_gif_download(callback: types.CallbackQuery):
@@ -693,31 +402,12 @@ async def cb_gif_download(callback: types.CallbackQuery):
         
     await callback.answer()
     
-    progress_msg = await bot.send_message(chat_id=chat_id, text="0%", reply_to_message_id=message_id)
-    last_reported_progress = [0]
+    progress_msg = await bot.send_message(chat_id=chat_id, text="جاري التحميل مولاي...", reply_to_message_id=message_id)
     
-    def gif_progress_hook(d):
-        if d['status'] == 'downloading':
-            total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
-            downloaded = d.get('downloaded_bytes', 0)
-            if total > 0:
-                percent = int((downloaded / total) * 100)
-                step = (percent // 25) * 25
-                if step > last_reported_progress[0] and step <= 100:
-                    last_reported_progress[0] = step
-                    try:
-                        asyncio.run_coroutine_threadsafe(
-                            progress_msg.edit_text(f"{step}%"),
-                            asyncio.get_event_loop()
-                        )
-                    except:
-                        pass
-
     ydl_opts = {
         'format': 'bestvideo[height<=720]/best',
         'quiet': True,
-        'no_warnings': True,
-        'progress_hooks': [gif_progress_hook]
+        'no_warnings': True
     }
     
     try:
@@ -760,8 +450,7 @@ async def cb_gif_download(callback: types.CallbackQuery):
         'format': 'bestvideo[height<=720]/best',
         'outtmpl': file_path,
         'quiet': True,
-        'no_warnings': True,
-        'progress_hooks': [gif_progress_hook]
+        'no_warnings': True
     }
     
     try:
@@ -838,7 +527,7 @@ async def handle_all_text_messages(message: types.Message):
     
     current_dev_button_toggle = not current_dev_button_toggle
 
-    await send_animated_text(
+    await send_bot_message(
         message.chat.id,
         response_text,
         reply_to_id=message.message_id,
@@ -854,7 +543,7 @@ async def main():
     
     for dev_id in DEVELOPER_IDS:
         try:
-            await send_animated_text(
+            await send_bot_message(
                 chat_id=dev_id, 
                 text=startup_text, 
                 send_food=True, 
