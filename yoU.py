@@ -110,8 +110,10 @@ def clear_system_cache(temp_file_list=None):
     
     gc.collect()
 
-async def send_animated_text(chat_id, text, reply_to_message_id=None, reply_markup=None):
-    words = text.split()
+def split_line_into_chunks(line):
+    words = line.split()
+    if not words:
+        return []
     chunks = []
     i = 0
     pattern = [4, 2, 3]
@@ -121,26 +123,33 @@ async def send_animated_text(chat_id, text, reply_to_message_id=None, reply_mark
         chunks.append(" ".join(words[i:i+take]))
         i += take
         pattern_idx = (pattern_idx + 1) % len(pattern)
+    return chunks
 
-    current_text = ""
+async def send_animated_text(chat_id, text, reply_to_message_id=None, reply_markup=None):
+    lines = text.split('\n')
+    lines_chunks = [split_line_into_chunks(line) for line in lines]
+    max_steps = max((len(chunks) for chunks in lines_chunks), default=0)
+
     message = None
     first_step_done = False
 
-    for idx, chunk in enumerate(chunks):
-        if current_text:
-            current_text += " " + chunk
-        else:
-            current_text = chunk
+    for step in range(max_steps):
+        current_lines = []
+        for chunks in lines_chunks:
+            take_count = min(step + 1, len(chunks))
+            current_lines.append(" ".join(chunks[:take_count]))
         
+        frame_text = "\n".join(current_lines)
+
         if message is None:
             message = await bot.send_message(
                 chat_id=chat_id,
-                text=current_text,
+                text=frame_text,
                 reply_to_message_id=reply_to_message_id
             )
             asyncio.create_task(handle_reaction(message, bot.id, is_bot=True))
         else:
-            await message.edit_text(current_text)
+            await message.edit_text(frame_text)
         
         if not first_step_done:
             first_step_done = True
@@ -148,10 +157,11 @@ async def send_animated_text(chat_id, text, reply_to_message_id=None, reply_mark
 
         await asyncio.sleep(0.3)
     
+    final_text = "\n".join([" ".join(chunks) for chunks in lines_chunks])
     if reply_markup:
-        await message.edit_text(current_text, reply_markup=reply_markup)
+        await message.edit_text(final_text, reply_markup=reply_markup)
     else:
-        await message.edit_text(current_text)
+        await message.edit_text(final_text)
         
     return message
 
@@ -168,30 +178,25 @@ async def send_delayed_emoji(chat_id, reply_msg_id):
         pass
 
 async def edit_animated_text(message, text, reply_markup=None):
-    words = text.split()
-    chunks = []
-    i = 0
-    pattern = [4, 2, 3]
-    pattern_idx = 0
-    while i < len(words):
-        take = pattern[pattern_idx]
-        chunks.append(" ".join(words[i:i+take]))
-        i += take
-        pattern_idx = (pattern_idx + 1) % len(pattern)
+    lines = text.split('\n')
+    lines_chunks = [split_line_into_chunks(line) for line in lines]
+    max_steps = max((len(chunks) for chunks in lines_chunks), default=0)
 
-    current_text = ""
-    for idx, chunk in enumerate(chunks):
-        if current_text:
-            current_text += " " + chunk
-        else:
-            current_text = chunk
-        await message.edit_text(current_text)
+    for step in range(max_steps):
+        current_lines = []
+        for chunks in lines_chunks:
+            take_count = min(step + 1, len(chunks))
+            current_lines.append(" ".join(chunks[:take_count]))
+        
+        frame_text = "\n".join(current_lines)
+        await message.edit_text(frame_text)
         await asyncio.sleep(0.3)
     
+    final_text = "\n".join([" ".join(chunks) for chunks in lines_chunks])
     if reply_markup:
-        await message.edit_text(current_text, reply_markup=reply_markup)
+        await message.edit_text(final_text, reply_markup=reply_markup)
     else:
-        await message.edit_text(current_text)
+        await message.edit_text(final_text)
 
 async def handle_reaction(message, user_id, is_owner=False, is_bot=False, chat_type="private"):
     if chat_type in {"group", "supergroup", "channel"}:
