@@ -144,7 +144,13 @@ async def download_logic(url: str, message: types.Message, is_group: bool, is_gi
         asyncio.create_task(set_random_reaction(message.chat.id, sent.message_id))
         os.remove(final_filename)
         
-        success = await message.reply("نيكني استاهل تشكني اطيعك مثل عديمة الكرامة")
+        # تم تعديل الرسالة هنا لتكون رداً مباشراً على رسالة الميديا المرسلة من البوت
+        success_text = (
+            "تغزل بيه اريد اكزكز واشبع رومانسيه\n"
+            "اريد اذوب من الغزل\n"
+            "اريد اموع وافقد من الدلال اريد كسي ينكع بدون فرك"
+        )
+        success = await sent.reply(success_text)
         asyncio.create_task(set_random_reaction(message.chat.id, success.message_id))
     except Exception:
         try: await status_msg.delete()
