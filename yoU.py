@@ -39,11 +39,11 @@ DEV_ID_1 = 8467593882
 DEV_ID_2 = 8597653867
 
 BOT_ROTATING_RESPONSES = [
-    "اهلين وياك بوت ميديا تريد اشتغل\n\nدز رابط وتدلل",
-    "مو ناوي تدلعني مثل البوتات\n\nترى ازعل منك اصيح المولاي يغصص بلاعيمك",
-    "راح اكلك شعر يهبل كتبته بماي كسي\n\nراح اونسك بس اسمع",
-    "من اشوف زبك يسعبل كسي وتذوب الروح انزل\n\nالعيرك ذليلة امصة ولباسي مشلوح",
-    "انزع لباسي الك وتنيكني يبعد كل طموح شكني\n\nبعيرك وضرطني العافيه ترى فدوة الك اروح"
+    "اهلين وياك بوت ميديا تريد اشتغل\nدز رابط وتدلل",
+    "مو ناوي تدلعني مثل البوتات\nترى ازعل منك اصيح المولاي يغصص بلاعيمك",
+    "راح اكلك شعر يهبل كتبته بماي كسي\nراح اونسك بس اسمع",
+    "من اشوف زبك يسعبل كسي وتذوب الروح انزل\nالعيرك ذليلة امصة ولباسي مشلوح",
+    "انزع لباسي الك وتنيكني يبعد كل طموح شكني\nبعيرك وضرطني العافيه ترى فدوة الك اروح"
 ]
 
 response_counter = 0
@@ -281,7 +281,7 @@ async def activate_group(message: types.Message):
         
     asyncio.create_task(handle_reaction(message, message.from_user.id, is_owner=is_owner, chat_type=message.chat.type))
     activated_chats.add(message.chat.id)
-    sent_msg = await send_animated_text(message.chat.id, "¹# - تم تفعيل البوت مولاي\n\nارسل رابط الان", message.message_id)
+    sent_msg = await send_animated_text(message.chat.id, "¹# - تم تفعيل البوت مولاي\nارسل رابط الان", message.message_id)
     asyncio.create_task(handle_reaction(sent_msg, bot.id, is_bot=True, chat_type=message.chat.type))
 
 @dp.message(F.chat.type.in_({"group", "supergroup", "channel"}), F.text == "تعطيل")
@@ -297,13 +297,13 @@ async def deactivate_group(message: types.Message):
     asyncio.create_task(handle_reaction(message, message.from_user.id, is_owner=is_owner, chat_type=message.chat.type))
     if message.chat.id in activated_chats:
         activated_chats.remove(message.chat.id)
-    sent_msg = await send_animated_text(message.chat.id, "¹# - تم تعطيل اليوت مولاي\n\nارسل رابط الان", message.message_id)
+    sent_msg = await send_animated_text(message.chat.id, "¹# - تم تعطيل اليوت مولاي\nارسل رابط الان", message.message_id)
     asyncio.create_task(handle_reaction(sent_msg, bot.id, is_bot=True, chat_type=message.chat.type))
 
 @dp.message(F.chat.type == "private", F.text == "ادت")
 async def edit_command(message: types.Message):
     asyncio.create_task(handle_reaction(message, message.from_user.id))
-    response_text = "تريد تغير لغة وضع اللغات دوس ع الزر الفوك يسار\n\nتريد تفعل وضع اللغات دوس ع الزر الفوك يمين"
+    response_text = "تريد تغير لغة وضع اللغات دوس ع الزر الفوك يسار\nتريد تفعل وضع اللغات دوس ع الزر الفوك يمين"
     
     sent_msg = await send_animated_text(
         chat_id=message.chat.id, 
@@ -340,24 +340,24 @@ async def process_lang_mode(callback: types.CallbackQuery):
     
     if new_state:
         await callback.answer(
-            text="تم تفعيل وضع اللغات\n\nالوضع ✅",
+            text="تم تفعيل وضع اللغات\nالوضع ✅",
             show_alert=False
         )
     else:
         await callback.answer(
-            text="تم تعطيل وضع اللغات\n\nالوضع ❌",
+            text="تم تعطيل وضع اللغات\nالوضع ❌",
             show_alert=False
         )
 
 @dp.callback_query(F.data == "switch_lang")
 async def process_switch_lang(callback: types.CallbackQuery):
-    await callback.message.edit_text("تريد تغير لغة وضع اللغات منا\n\nاكو زرين عندك")
+    await callback.message.edit_text("تريد تغير لغة وضع اللغات منا\nاكو زرين عندك")
     await callback.message.edit_reply_markup(reply_markup=get_switch_keyboard())
     await callback.answer()
 
 @dp.callback_query(F.data == "back_to_edit")
 async def process_back_to_edit(callback: types.CallbackQuery):
-    await callback.message.edit_text("تريد تغير لغة وضع اللغات دوس ع الزر الفوك يسار\n\nتريد تفعل وضع اللغات دوس ع الزر الفوك يمين")
+    await callback.message.edit_text("تريد تغير لغة وضع اللغات دوس ع الزر الفوك يسار\nتريد تفعل وضع اللغات دوس ع الزر الفوك يمين")
     await callback.message.edit_reply_markup(reply_markup=get_edit_keyboard(callback.from_user.id))
     await callback.answer()
 
@@ -367,18 +367,19 @@ async def process_set_lang(callback: types.CallbackQuery):
     chosen_lang = "eNG" if callback.data == "set_eng" else "rUS"
     user_langs[user_id] = "en" if callback.data == "set_eng" else "ru"
     
-    target_msg = f"تم تغيير لغة وضع اللغات مولاي\n\nصارت {chosen_lang}"
+    target_msg = f"تم تغيير لغة وضع اللغات مولاي\nصارت\n{chosen_lang}"
+    
     await edit_animated_text(callback.message, target_msg)
     await asyncio.sleep(1)
     
-    await callback.message.edit_text("تريد تغير لغة وضع اللغات دوس ع الزر الفوك يسار\n\nتريد تفعل وضع اللغات دوس ع الزر الفوك يمين")
+    await callback.message.edit_text("تريد تغير لغة وضع اللغات دوس ع الزر الفوك يسار\nتريد تفعل وضع اللغات دوس ع الزر الفوك يمين")
     await callback.message.edit_reply_markup(reply_markup=get_edit_keyboard(user_id))
     await callback.answer()
 
 async def execute_download_task(message: types.Message, url: str, user_id: int):
     status_msg = await send_animated_text(
         message.chat.id, 
-        "دانفذ طلبك المقدس عزيزي وامص عيرك\n\nالعظيم بكل الوضعيات", 
+        "دانفذ طلبك المقدس عزيزي وامص عيرك\nالعظيم بكل الوضعيات", 
         message.message_id
     )
     asyncio.create_task(handle_reaction(status_msg, bot.id, is_bot=True, chat_type=message.chat.type))
@@ -416,108 +417,125 @@ async def execute_download_task(message: types.Message, url: str, user_id: int):
 
     downloaded_paths = []
     try:
-        loop = asyncio.get_event_loop()
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = await loop.run_in_executor(None, lambda: ydl.extract_info(url, download=False))
-            
-            title = info.get('title', 'Unknown')
-            uploader = info.get('uploader', info.get('channel', 'Unknown'))
-
-            formatted_title = filter_title(clean_and_format_text(title))
-            formatted_uploader = filter_uploader(clean_and_format_text(uploader))
-            
-            base_name = f"{formatted_uploader} - {formatted_title}"
-
-            entries = info.get('entries')
-            
-            if entries is not None:
-                all_entries = list(entries)
-                total_entries = len(all_entries)
+        loop = asyncio.get_running_loop()
+        
+        def run_extract():
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                return ydl.extract_info(url, download=False)
                 
-                download_info = await loop.run_in_executor(None, lambda: ydl.extract_info(url, download=True))
-                download_entries = download_info.get('entries', [])
-                
-                temp_files = []
-                for idx, entry in enumerate(download_entries):
-                    if not entry:
-                        continue
-                    filename = ydl.prepare_filename(entry)
-                    if os.path.exists(filename):
-                        temp_files.append((filename, entry))
-                
-                all_media_items = []
-                for idx, (filename, entry) in enumerate(temp_files):
-                    mime_type, _ = mimetypes.guess_type(filename)
-                    ext = mimetypes.guess_extension(mime_type) if mime_type else os.path.splitext(filename)[1]
-                    if not ext:
-                        ext = os.path.splitext(filename)[1]
-                    
-                    random_suffix = f"_{random.randint(100, 999)}"
-                    renamed_file = f"{base_name}{random_suffix}{ext}"
-                    os.rename(filename, renamed_file)
-                    downloaded_paths.append(renamed_file)
-                    
-                    input_file = types.FSInputFile(renamed_file)
-                    all_media_items.append(InputMediaDocument(media=input_file))
-                
-                chunk_size = 8
-                for chunk_idx in range(0, len(all_media_items), chunk_size):
-                    chunk = all_media_items[chunk_idx:chunk_idx + chunk_size]
-                    sent_group = await bot.send_media_group(chat_id=message.chat.id, media=chunk, reply_to_message_id=message.message_id)
-                    for item_msg in sent_group:
-                        asyncio.create_task(handle_reaction(item_msg, bot.id, is_bot=True))
+        info = await loop.run_in_executor(None, run_extract)
+        
+        title = info.get('title', 'Unknown')
+        uploader = info.get('uploader', info.get('channel', 'Unknown'))
 
-                sent_confirm = await bot.send_message(
-                    chat_id=message.chat.id,
-                    text="نيكني بداعتي استاهل تنيكني هلكد اطيعك وصرت عاهرة بكل المعايير علمود اناج من عندك بليز",
-                    reply_to_message_id=message.message_id
-                )
-                asyncio.create_task(handle_reaction(sent_confirm, bot.id, is_bot=True))
+        formatted_title = filter_title(clean_and_format_text(title))
+        formatted_uploader = filter_uploader(clean_and_format_text(uploader))
+        
+        base_name = f"{formatted_uploader} - {formatted_title}"
+        entries = info.get('entries')
+        
+        if entries is not None:
+            def run_dl_entries():
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    return ydl.extract_info(url, download=True)
             
-            else:
-                download_info = await loop.run_in_executor(None, lambda: ydl.extract_info(url, download=True))
-                filename = ydl.prepare_filename(download_info)
-
+            download_info = await loop.run_in_executor(None, run_dl_entries)
+            download_entries = download_info.get('entries', [])
+            
+            temp_files = []
+            for idx, entry in enumerate(download_entries):
+                if not entry:
+                    continue
+                filename = ydl_opts.get('outtmpl') % entry
                 if not os.path.exists(filename):
-                    raise FileNotFoundError
-
+                    filename = f"{entry.get('id')}.mp4"
+                    if not os.path.exists(filename):
+                        continue
+                temp_files.append((filename, entry))
+            
+            all_media_items = []
+            for idx, (filename, entry) in enumerate(temp_files):
                 mime_type, _ = mimetypes.guess_type(filename)
                 ext = mimetypes.guess_extension(mime_type) if mime_type else os.path.splitext(filename)[1]
                 if not ext:
                     ext = os.path.splitext(filename)[1]
-
-                renamed_file = f"{base_name}{ext}"
+                
+                random_suffix = f"_{random.randint(100, 999)}"
+                renamed_file = f"{base_name}{random_suffix}{ext}"
                 os.rename(filename, renamed_file)
                 downloaded_paths.append(renamed_file)
-
+                
                 input_file = types.FSInputFile(renamed_file)
-                
-                is_video = mime_type and mime_type.startswith("video")
-                gif_markup = None
-                if is_video:
-                    gif_markup = InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text="ستيكر GIF", callback_data=f"dl_gif:{url}", style=ButtonStyle.SUCCESS)]
-                    ])
-                
-                sent_media = await message.reply_document(input_file, reply_markup=gif_markup)
-                asyncio.create_task(handle_reaction(sent_media, bot.id, is_bot=True))
+                all_media_items.append(InputMediaDocument(media=input_file))
+            
+            chunk_size = 8
+            for chunk_idx in range(0, len(all_media_items), chunk_size):
+                chunk = all_media_items[chunk_idx:chunk_idx + chunk_size]
+                sent_group = await bot.send_media_group(chat_id=message.chat.id, media=chunk, reply_to_message_id=message.message_id)
+                for item_msg in sent_group:
+                    asyncio.create_task(handle_reaction(item_msg, bot.id, is_bot=True))
 
-                if sent_media and sent_media.document:
-                    file_id = sent_media.document.file_id
-                    file_id_cache[url] = {
-                        "file_id": file_id,
-                        "type": "single_video" if is_video else "single_other"
-                    }
+            sent_confirm = await bot.send_message(
+                chat_id=message.chat.id,
+                text="نيكني بداعتي استاهل تنيكني هلكد اطيعك وصرت عاهرة بكل المعايير علمود اناج من عندك بليز",
+                reply_to_message_id=message.message_id
+            )
+            asyncio.create_task(handle_reaction(sent_confirm, bot.id, is_bot=True))
+        
+        else:
+            def run_dl_single():
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    return ydl.extract_info(url, download=True)
+                    
+            download_info = await loop.run_in_executor(None, run_dl_single)
+            filename = f"{download_info.get('id')}.{download_info.get('ext')}"
+            
+            if not os.path.exists(filename):
+                for f in os.listdir('.'):
+                    if f.startswith(download_info.get('id')):
+                        filename = f
+                        break
 
-                sent_confirm = await bot.send_message(
-                    chat_id=message.chat.id,
-                    text="نيكني بداعتي استاهل تنيكني هلكد اطيعك وصرت عاهرة بكل المعايير علمود اناج من عندك بليز",
-                    reply_to_message_id=message.message_id
-                )
-                asyncio.create_task(handle_reaction(sent_confirm, bot.id, is_bot=True))
+            if not os.path.exists(filename):
+                raise FileNotFoundError
+
+            mime_type, _ = mimetypes.guess_type(filename)
+            ext = mimetypes.guess_extension(mime_type) if mime_type else os.path.splitext(filename)[1]
+            if not ext:
+                ext = os.path.splitext(filename)[1]
+
+            renamed_file = f"{base_name}{ext}"
+            os.rename(filename, renamed_file)
+            downloaded_paths.append(renamed_file)
+
+            input_file = types.FSInputFile(renamed_file)
+            
+            is_video = mime_type and mime_type.startswith("video")
+            gif_markup = None
+            if is_video:
+                gif_markup = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="ستيكر GIF", callback_data=f"dl_gif:{url}", style=ButtonStyle.SUCCESS)]
+                ])
+            
+            sent_media = await message.reply_document(input_file, reply_markup=gif_markup)
+            asyncio.create_task(handle_reaction(sent_media, bot.id, is_bot=True))
+
+            if sent_media and sent_media.document:
+                file_id = sent_media.document.file_id
+                file_id_cache[url] = {
+                    "file_id": file_id,
+                    "type": "single_video" if is_video else "single_other"
+                }
+
+            sent_confirm = await bot.send_message(
+                chat_id=message.chat.id,
+                text="نيكني بداعتي استاهل تنيكني هلكد اطيعك وصرت عاهرة بكل المعايير علمود اناج من عندك بليز",
+                reply_to_message_id=message.message_id
+            )
+            asyncio.create_task(handle_reaction(sent_confirm, bot.id, is_bot=True))
 
     except Exception as e:
-        error_text = "الرابط غير مدعوم او الموقع مو مدعوم\n\nشم كسي ويصير مدعوم ههع امزح دادي"
+        error_text = "الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي"
         await edit_animated_text(status_msg, error_text)
     
     clear_system_cache(downloaded_paths)
@@ -571,52 +589,63 @@ async def process_download_gif(callback: types.CallbackQuery):
 
     renamed_file = None
     try:
-        loop = asyncio.get_event_loop()
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            download_info = await loop.run_in_executor(None, lambda: ydl.extract_info(url, download=True))
-            filename = ydl.prepare_filename(download_info)
+        loop = asyncio.get_running_loop()
+        
+        def run_gif_dl():
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                return ydl.extract_info(url, download=True)
+                
+        download_info = await loop.run_in_executor(None, run_gif_dl)
+        filename = f"gif_temp_{download_info.get('id')}.{download_info.get('ext')}"
+        
+        if not os.path.exists(filename):
+            for f in os.listdir('.'):
+                if f.startswith(f"gif_temp_{download_info.get('id')}"):
+                    filename = f
+                    break
 
-            if not os.path.exists(filename):
-                raise FileNotFoundError
+        if not os.path.exists(filename):
+            raise FileNotFoundError
 
-            mime_type, _ = mimetypes.guess_type(filename)
-            ext = mimetypes.guess_extension(mime_type) if mime_type else os.path.splitext(filename)[1]
-            if not ext:
-                ext = os.path.splitext(filename)[1]
+        mime_type, _ = mimetypes.guess_type(filename)
+        ext = mimetypes.guess_extension(mime_type) if mime_type else os.path.splitext(filename)[1]
+        if not ext:
+            ext = os.path.splitext(filename)[1]
 
-            renamed_file = f"gif_ready_{user_id}_{random.randint(1000, 9999)}{ext}"
-            os.rename(filename, renamed_file)
+        renamed_file = f"gif_ready_{user_id}_{random.randint(1000, 9999)}{ext}"
+        os.rename(filename, renamed_file)
 
-            input_file = types.FSInputFile(renamed_file)
+        input_file = types.FSInputFile(renamed_file)
 
-            sent_note = await bot.send_video_note(
-                chat_id=chat_id,
-                video_note=input_file,
-                reply_to_message_id=callback.message.message_id,
-                has_spoiler=True
-            )
-            asyncio.create_task(handle_reaction(sent_note, bot.id, is_bot=True))
+        sent_note = await bot.send_video_note(
+            chat_id=chat_id,
+            video_note=input_file,
+            reply_to_message_id=callback.message.message_id,
+            has_spoiler=True
+        )
+        asyncio.create_task(handle_reaction(sent_note, bot.id, is_bot=True))
 
-            sent_confirm = await bot.send_message(
-                chat_id=chat_id,
-                text="نيكني بداعتي استاهل تنيكني هلكد اطيعك وصرت عاهرة بكل المعايير علمود اناج من عندك بليز",
-                reply_to_message_id=callback.message.message_id
-            )
-            asyncio.create_task(handle_reaction(sent_confirm, bot.id, is_bot=True))
-            
-            try:
-                await status_msg.delete()
-            except:
-                pass
+        sent_confirm = await bot.send_message(
+            chat_id=chat_id,
+            text="نيكني بداعتي استاهل تنيكني هلكد اطيعك وصرت عاهرة بكل المعايير علمود اناج من عندك بليز",
+            reply_to_message_id=callback.message.message_id
+        )
+        asyncio.create_task(handle_reaction(sent_confirm, bot.id, is_bot=True))
+        
+        try:
+            await status_msg.delete()
+        except:
+            pass
 
     except Exception as e:
-        error_text = "الرابط غير مدعوم او الموقع مو مدعوم\n\nشم كسي ويصير مدعوم ههع امزح دادي"
+        error_text = "الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي"
         await status_msg.edit_text(error_text)
 
     clear_system_cache([renamed_file])
 
 async def queue_worker(user_id, url, message):
     if user_id not in user_semaphores:
+        user_semaphores[user_id] = asyncio.get_event_loop().is_running() and asyncio.Semaphore(2) or None
         user_semaphores[user_id] = asyncio.Semaphore(2)
         user_queue_counts[user_id] = 0
 
@@ -628,7 +657,7 @@ async def queue_worker(user_id, url, message):
         user_queue_counts[user_id] -= 1
         await execute_download_task(message, url, user_id)
 
-@dp.message()
+@dp.message(F.text)
 async def handle_all_messages(message: types.Message):
     global response_counter, developer_counter
     
@@ -703,7 +732,7 @@ async def handle_all_messages(message: types.Message):
 async def notify_developers_on_startup():
     await asyncio.sleep(2)
     dev_ids = [DEV_ID_1, DEV_ID_2]
-    startup_text = "اشتغل البوت مرتلخ تاج راسي\n\nارضع عيرك ؟!"
+    startup_text = "اشتغل البوت مرتلخ تاج راسي\nارضع عيرك ؟!"
     
     god_keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="رب العالمين", url="tg://user?id=8467593882", style=ButtonStyle.DANGER)]
