@@ -5,7 +5,6 @@ import asyncio
 import random
 import mimetypes
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaDocument
 from googletrans import Translator
 import yt_dlp
@@ -207,7 +206,7 @@ async def handle_reaction(message, user_id, is_owner=False, is_bot=False, chat_t
     if user_id not in last_reactions:
         last_reactions[user_id] = []
     last_reactions[user_id].append(reaction)
-    if len(last_reactions[user_id]) > 3:
+    if len(last_reactions[user_id]) > 4:
         last_reactions[user_id].pop(0)
 
     prev_delays = last_delays.get(user_id, [])
@@ -219,7 +218,7 @@ async def handle_reaction(message, user_id, is_owner=False, is_bot=False, chat_t
     if user_id not in last_delays:
         last_delays[user_id] = []
     last_delays[user_id].append(delay)
-    if len(last_delays[user_id]) > 2:
+    if len(last_delays[user_id]) > 3:
         last_delays[user_id].pop(0)
 
     await asyncio.sleep(delay)
@@ -235,10 +234,10 @@ def get_edit_keyboard(user_id):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="وضع اللغات", callback_data="lang_mode", color=lang_color),
-            InlineKeyboardButton(text="مسح", callback_data="clear_proc", color="red")
+            InlineKeyboardButton(text="تبديل اللغة", callback_data="switch_lang", color=lang_color)
         ],
         [
-            InlineKeyboardButton(text="تبديل اللغة", callback_data="switch_lang", color=lang_color)
+            InlineKeyboardButton(text="مسح", callback_data="clear_proc", color="red")
         ]
     ])
     return keyboard
@@ -300,7 +299,7 @@ async def deactivate_group(message: types.Message):
     sent_msg = await send_animated_text(message.chat.id, "¹# - تم تعطيل اليوت مولاي\n\nارسل رابط الان", message.message_id)
     asyncio.create_task(handle_reaction(sent_msg, bot.id, is_bot=True, chat_type=message.chat.type))
 
-@dp.message(F.chat.type == "private", Command("ادت"))
+@dp.message(F.chat.type == "private", F.text == "ادت")
 async def edit_command(message: types.Message):
     asyncio.create_task(handle_reaction(message, message.from_user.id))
     response_text = "تريد تغير لغة وضع اللغات دوس ع الزر الفوك يسار\n\nتريد تفعل وضع اللغات دوس ع الزر الفوك يمين"
@@ -658,10 +657,17 @@ async def handle_all_messages(message: types.Message):
     if is_group_or_channel and chat_id not in activated_chats:
         return
 
-    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\ treasure),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
-    if urls:
-        url = urls[0]
-        asyncio.create_task(queue_worker(user_id, url, message))
+    all_urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\ treasure),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+    valid_url = None
+    for url in all_urls:
+        is_telegram_link = bool(re.search(r'(t\.me|telegram\.me|telegram\.org)', url, re.IGNORECASE))
+        is_youtube_link = bool(re.search(r'(youtube\.com|youtu\.be)', url, re.IGNORECASE))
+        if not is_telegram_link and not is_youtube_link:
+            valid_url = url
+            break
+
+    if valid_url:
+        asyncio.create_task(queue_worker(user_id, valid_url, message))
         return
 
     if is_group_or_channel:
