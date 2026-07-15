@@ -40,7 +40,7 @@ user_active_downloads = {}
 active_edit_menus = {}
 
 RANDOM_RESPONSES = [
-    "اهلين وياك بوت ميديا تريد اشتغل \nدز رابط وتدلل",
+    "اهلين وياك بوت mيديا تريد اشتغل \nدز رابط وتدلل",
     "مو ناوي تدلعني مثل البوتات\nترى ازعل منك اصيح المولاي يغصص بلاعيمك",
     "راح اكلك شعر يهبل كتبته بماي كسي\nراح اونسك بس اسمع",
     "من اشوف زبك يسعبل كسي وتذوب الروح انزل\nالعيرك ذليلة امصة ولباسي مشلوح",
@@ -50,20 +50,6 @@ current_response_index = 0
 current_dev_button_toggle = True
 
 DEVELOPER_IDS = [8467593882, 8597653867]
-
-CUSTOM_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-    'Accept-Language': 'en-US,en;q=0.9,ar;q=0.8',
-    'Sec-Ch-Ua': '"Not/A)Brand";v="8", "Chromium";v="146", "Google Chrome";v="146"',
-    'Sec-Ch-Ua-Mobile': '?0',
-    'Sec-Ch-Ua-Platform': '"Windows"',
-    'Sec-Fetch-Dest': 'document',
-    'Sec-Fetch-Mode': 'navigate',
-    'Sec-Fetch-Site': 'none',
-    'Sec-Fetch-User': '?1',
-    'Upgrade-Insecure-Requests': '1'
-}
 
 def get_unique_reaction(chat_id: int) -> str:
     if chat_id not in LAST_REACTIONS:
@@ -109,43 +95,66 @@ async def send_next_food_emoji(chat_id: int, reply_to_msg_id: int):
     msg = await bot.send_message(chat_id=chat_id, text=emoji, reply_to_message_id=reply_to_msg_id)
     asyncio.create_task(set_random_reaction(chat_id, msg.message_id))
 
+def split_text_into_lines_and_chunks(text: str) -> list:
+    lines = text.splitlines()
+    all_lines_chunks = []
+    max_chunks = 0
+    
+    for line in lines:
+        words = line.split()
+        chunks = []
+        i = 0
+        pattern = [3, 2, 3, 1]
+        pattern_idx = 0
+        while i < len(words):
+            take = pattern[pattern_idx % len(pattern)]
+            chunk = " ".join(words[i:i+take])
+            chunks.append(chunk)
+            i += take
+            pattern_idx += 1
+        all_lines_chunks.append(chunks)
+        if len(chunks) > max_chunks:
+            max_chunks = len(chunks)
+            
+    return all_lines_chunks, max_chunks
+
 async def send_animated_text(chat_id: int, text: str, reply_to_id: int = None, send_food: bool = True, reply_markup=None) -> types.Message:
-    words = text.split()
-    chunks = []
-    i = 0
-    pattern = [3, 2, 3, 1]
-    pattern_idx = 0
-    while i < len(words):
-        take = pattern[pattern_idx % len(pattern)]
-        chunk = " ".join(words[i:i+take])
-        chunks.append(chunk)
-        i += take
-        pattern_idx += 1
+    all_lines_chunks, max_chunks = split_text_into_lines_and_chunks(text)
     
-    current_text = chunks[0]
-    msg = await bot.send_message(chat_id=chat_id, text=current_text, reply_to_message_id=reply_to_id)
-    
-    if len(chunks) > 1:
-        await asyncio.sleep(0.3)
-        current_text += " " + chunks[1]
-        try:
-            await msg.edit_text(current_text)
-        except:
-            pass
+    if max_chunks == 0:
+        msg = await bot.send_message(chat_id=chat_id, text=text, reply_to_message_id=reply_to_id)
         if send_food:
             asyncio.create_task(send_next_food_emoji(chat_id, msg.message_id))
-        
-        for next_chunk in chunks[2:]:
-            await asyncio.sleep(0.3)
-            current_text += " " + next_chunk
+        if reply_markup:
             try:
-                await msg.edit_text(current_text)
+                await msg.edit_reply_markup(reply_markup=reply_markup)
             except:
                 pass
-    else:
-        if send_food:
-            asyncio.create_task(send_next_food_emoji(chat_id, msg.message_id))
+        return msg
+
+    current_state_by_line = [""] * len(all_lines_chunks)
+    
+    for step in range(max_chunks):
+        for line_idx, chunks in enumerate(all_lines_chunks):
+            if step < len(chunks):
+                if current_state_by_line[line_idx]:
+                    current_state_by_line[line_idx] += " " + chunks[step]
+                else:
+                    current_state_by_line[line_idx] = chunks[step]
+                    
+        frame_text = "\n".join(current_state_by_line)
         
+        if step == 0:
+            msg = await bot.send_message(chat_id=chat_id, text=frame_text, reply_to_message_id=reply_to_id)
+            if send_food:
+                asyncio.create_task(send_next_food_emoji(chat_id, msg.message_id))
+        else:
+            await asyncio.sleep(0.3)
+            try:
+                await msg.edit_text(frame_text)
+            except:
+                pass
+                
     if reply_markup:
         try:
             await msg.edit_reply_markup(reply_markup=reply_markup)
@@ -155,44 +164,39 @@ async def send_animated_text(chat_id: int, text: str, reply_to_id: int = None, s
     return msg
 
 async def edit_animated_text(msg: types.Message, text: str, send_food: bool = True):
-    words = text.split()
-    chunks = []
-    i = 0
-    pattern = [3, 2, 3, 1]
-    pattern_idx = 0
-    while i < len(words):
-        take = pattern[pattern_idx % len(pattern)]
-        chunk = " ".join(words[i:i+take])
-        chunks.append(chunk)
-        i += take
-        pattern_idx += 1
+    all_lines_chunks, max_chunks = split_text_into_lines_and_chunks(text)
     
-    current_text = chunks[0]
-    try:
-        await msg.edit_text(current_text)
-    except:
-        pass
-        
-    if len(chunks) > 1:
-        await asyncio.sleep(0.3)
-        current_text += " " + chunks[1]
+    if max_chunks == 0:
         try:
-            await msg.edit_text(current_text)
+            await msg.edit_text(text)
         except:
             pass
         if send_food:
             asyncio.create_task(send_next_food_emoji(msg.chat.id, msg.message_id))
+        return
+
+    current_state_by_line = [""] * len(all_lines_chunks)
+    
+    for step in range(max_chunks):
+        for line_idx, chunks in enumerate(all_lines_chunks):
+            if step < len(chunks):
+                if current_state_by_line[line_idx]:
+                    current_state_by_line[line_idx] += " " + chunks[step]
+                else:
+                    current_state_by_line[line_idx] = chunks[step]
+                    
+        frame_text = "\n".join(current_state_by_line)
         
-        for next_chunk in chunks[2:]:
-            await asyncio.sleep(0.3)
-            current_text += " " + next_chunk
-            try:
-                await msg.edit_text(current_text)
-            except:
-                pass
-    else:
-        if send_food:
+        try:
+            await msg.edit_text(frame_text)
+        except:
+            pass
+            
+        if step == 0 and send_food:
             asyncio.create_task(send_next_food_emoji(msg.chat.id, msg.message_id))
+            
+        if step < max_chunks - 1:
+            await asyncio.sleep(0.3)
 
 def format_custom_case(text: str) -> str:
     result = []
@@ -233,6 +237,19 @@ def build_edit_keyboard(lang_mode_active: bool = False):
         [
             types.InlineKeyboardButton(text="مسح", callback_data="btn_clear", style="danger")
         ]
+    ]
+    return types.InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def build_switch_lang_keyboard(selected_lang: str = None):
+    color_en = "danger" if selected_lang == "en" else "primary"
+    color_ru = "danger" if selected_lang == "ru" else "primary"
+    
+    buttons = [
+        [
+            types.InlineKeyboardButton(text="eNG", callback_data="set_lang_en", style=color_en),
+            types.InlineKeyboardButton(text="rUS", callback_data="set_lang_ru", style=color_ru)
+        ],
+        [types.InlineKeyboardButton(text="عودة", callback_data="btn_back", style="primary")]
     ]
     return types.InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -352,21 +369,15 @@ async def cb_lang_mode(callback: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "btn_switch_lang")
 async def cb_switch_lang(callback: types.CallbackQuery, state: FSMContext):
-    current_state = await state.get_state()
-    is_active = current_state == BotStates.lang_mode.state
+    author_id = callback.from_user.id
+    current_lang = USER_LANGS.get(author_id, "ru")
     
-    color_en = "primary"
-    color_ru = "primary"
-    
-    buttons = [
-        [
-            types.InlineKeyboardButton(text="eNG", callback_data="set_lang_en", style=color_en),
-            types.InlineKeyboardButton(text="rUS", callback_data="set_lang_ru", style=color_ru)
-        ],
-        [types.InlineKeyboardButton(text="عودة", callback_data="btn_back", style="primary")]
-    ]
-    markup = types.InlineKeyboardMarkup(inline_keyboard=buttons)
-    await callback.message.edit_text("تريد تغير لغة وضع اللغات منا اكو زرين عندك", reply_markup=markup)
+    text_reply = (
+        "تريد تغير لغة وضع اللغات منا\n"
+        "اكو زرين عندك"
+    )
+    markup = build_switch_lang_keyboard(selected_lang=current_lang)
+    await callback.message.edit_text(text_reply, reply_markup=markup)
 
 @dp.callback_query(F.data == "btn_back")
 async def cb_back(callback: types.CallbackQuery, state: FSMContext):
@@ -385,20 +396,13 @@ async def cb_set_lang(callback: types.CallbackQuery, state: FSMContext):
     author_id = callback.from_user.id
     lang_code = callback.data.split("_")[2]
     USER_LANGS[author_id] = lang_code
-    lang_str = "eNG" if lang_code == "en" else "rUS"
     
-    await callback.message.edit_text(f"تم تغيير لغة وضع اللغات مولاي صارت {lang_str}")
-    await asyncio.sleep(2.0)
-    
-    current_state = await state.get_state()
-    is_active = current_state == BotStates.lang_mode.state
-    
-    text_reply = (
-        "تريد تغير لغة وضع اللغات دوس ع الزر الفوك يسار\n"
-        "تريد تفعل وضع اللغات دوس ع الزر الفوك يمين"
-    )
-    keyboard = build_edit_keyboard(lang_mode_active=is_active)
-    await callback.message.edit_text(text_reply, reply_markup=keyboard)
+    markup = build_switch_lang_keyboard(selected_lang=lang_code)
+    try:
+        await callback.message.edit_reply_markup(reply_markup=markup)
+    except:
+        pass
+    await callback.answer()
 
 @dp.message(BotStates.lang_mode, F.text)
 async def process_lang_mode_text(message: types.Message, state: FSMContext):
@@ -509,8 +513,7 @@ async def download_logic(url: str, message: types.Message, is_group: bool):
         'format': 'bestvideo+bestaudio/best',
         'quiet': True,
         'no_warnings': True,
-        'progress_hooks': [progress_hook],
-        'http_headers': CUSTOM_HEADERS
+        'progress_hooks': [progress_hook]
     }
     
     try:
@@ -550,15 +553,15 @@ async def download_logic(url: str, message: types.Message, is_group: bool):
                     best_audio_only = f
 
         selected_formats = []
-        if best_video_only and best_audio_only:
+        if Hacker_combined := best_combined:
+            selected_formats = [Hacker_combined]
+        elif best_video_only and best_audio_only:
             combined_bitrate = best_combined.get('tbr', 0) if best_combined else 0
             separate_bitrate = (best_video_only.get('tbr', 0) or 0) + (best_audio_only.get('tbr', 0) or 0)
             if separate_bitrate > combined_bitrate:
                 selected_formats = [best_video_only, best_audio_only]
             else:
                 selected_formats = [best_combined] if best_combined else [best_video_only, best_audio_only]
-        elif best_combined:
-            selected_formats = [best_combined]
         elif best_video_only:
             selected_formats = [best_video_only]
         elif best_audio_only:
@@ -598,8 +601,7 @@ async def download_logic(url: str, message: types.Message, is_group: bool):
                 'outtmpl': f'downloads/{base_filename}_temp_{idx}.%(ext)s',
                 'quiet': True,
                 'no_warnings': True,
-                'progress_hooks': [progress_hook],
-                'http_headers': CUSTOM_HEADERS
+                'progress_hooks': [progress_hook]
             }
             
             try:
@@ -710,8 +712,7 @@ async def cb_gif_download(callback: types.CallbackQuery):
         'format': 'bestvideo[height<=720]/best',
         'quiet': True,
         'no_warnings': True,
-        'progress_hooks': [gif_progress_hook],
-        'http_headers': CUSTOM_HEADERS
+        'progress_hooks': [gif_progress_hook]
     }
     
     try:
@@ -755,8 +756,7 @@ async def cb_gif_download(callback: types.CallbackQuery):
         'outtmpl': file_path,
         'quiet': True,
         'no_warnings': True,
-        'progress_hooks': [gif_progress_hook],
-        'http_headers': CUSTOM_HEADERS
+        'progress_hooks': [gif_progress_hook]
     }
     
     try:
