@@ -102,7 +102,7 @@ async def download_logic(url: str, message: types.Message, is_group: bool, is_gi
     os.makedirs("downloads", exist_ok=True)
     
     ydl_opts = {
-        'format': 'bestvideo+bestaudio/best',
+        'format': 'bestvideo' if is_gif else 'bestvideo+bestaudio/best',
         'outtmpl': 'downloads/%(uploader)s - %(title)s.%(ext)s',
         'quiet': True,
         'nocheckcertificate': True,
@@ -134,7 +134,7 @@ async def download_logic(url: str, message: types.Message, is_group: bool, is_gi
         file_input = types.FSInputFile(final_filename)
         
         if is_gif:
-            sent = await bot.send_animation(message.chat.id, file_input, reply_to_message_id=message.message_id, has_spoiler=True)
+            sent = await bot.send_video(message.chat.id, file_input, reply_to_message_id=message.message_id, has_spoiler=True)
         else:
             cache_id = f"g_{random.randint(1000, 9999)}"
             URL_CACHE[cache_id] = url
@@ -144,7 +144,6 @@ async def download_logic(url: str, message: types.Message, is_group: bool, is_gi
         asyncio.create_task(set_random_reaction(message.chat.id, sent.message_id))
         os.remove(final_filename)
         
-        # تم تعديل الرسالة هنا لتكون رداً مباشراً على رسالة الميديا المرسلة من البوت
         success_text = (
             "تغزل بيه اريد اكزكز واشبع رومانسيه\n"
             "اريد اذوب من الغزل\n"
