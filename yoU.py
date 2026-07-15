@@ -6,6 +6,7 @@ import random
 import mimetypes
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaDocument
+from aiogram.enums import ButtonStyle
 from googletrans import Translator
 import yt_dlp
 
@@ -229,15 +230,15 @@ async def handle_reaction(message, user_id, is_owner=False, is_bot=False, chat_t
 
 def get_edit_keyboard(user_id):
     is_active = user_modes.get(user_id, False)
-    lang_color = "red" if is_active else "blue"
+    lang_style = ButtonStyle.DANGER if is_active else ButtonStyle.PRIMARY
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="وضع اللغات", callback_data="lang_mode", color=lang_color),
-            InlineKeyboardButton(text="تبديل اللغة", callback_data="switch_lang", color=lang_color)
+            InlineKeyboardButton(text="وضع اللغات", callback_data="lang_mode", style=lang_style),
+            InlineKeyboardButton(text="تبديل اللغة", callback_data="switch_lang", style=lang_style)
         ],
         [
-            InlineKeyboardButton(text="مسح", callback_data="clear_proc", color="red")
+            InlineKeyboardButton(text="مسح", callback_data="clear_proc", style=ButtonStyle.DANGER)
         ]
     ])
     return keyboard
@@ -245,11 +246,11 @@ def get_edit_keyboard(user_id):
 def get_switch_keyboard():
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="eNG", callback_data="set_eng", color="blue"),
-            InlineKeyboardButton(text="rUS", callback_data="set_rus", color="blue")
+            InlineKeyboardButton(text="eNG", callback_data="set_eng", style=ButtonStyle.PRIMARY),
+            InlineKeyboardButton(text="rUS", callback_data="set_rus", style=ButtonStyle.PRIMARY)
         ],
         [
-            InlineKeyboardButton(text="عودة", callback_data="back_to_edit", color="blue")
+            InlineKeyboardButton(text="عودة", callback_data="back_to_edit", style=ButtonStyle.PRIMARY)
         ]
     ])
     return keyboard
@@ -389,7 +390,7 @@ async def execute_download_task(message: types.Message, url: str, user_id: int):
             gif_markup = None
             if cached_data.get("type") == "single_video":
                 gif_markup = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="ستيكر GIF", callback_data=f"dl_gif:{url}", color="green")]
+                    [InlineKeyboardButton(text="ستيكر GIF", callback_data=f"dl_gif:{url}", style=ButtonStyle.SUCCESS)]
                 ])
             
             sent_doc = await message.reply_document(cached_file_id, reply_markup=gif_markup)
@@ -495,7 +496,7 @@ async def execute_download_task(message: types.Message, url: str, user_id: int):
                 gif_markup = None
                 if is_video:
                     gif_markup = InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text="ستيكر GIF", callback_data=f"dl_gif:{url}", color="green")]
+                        [InlineKeyboardButton(text="ستيكر GIF", callback_data=f"dl_gif:{url}", style=ButtonStyle.SUCCESS)]
                     ])
                 
                 sent_media = await message.reply_document(input_file, reply_markup=gif_markup)
@@ -528,7 +529,7 @@ async def process_download_gif(callback: types.CallbackQuery):
     user_id = callback.from_user.id
 
     dev_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="رب العالمين", url="tg://user?id=8467593882", color="red")]
+        [InlineKeyboardButton(text="رب العالمين", url="tg://user?id=8467593882", style=ButtonStyle.DANGER)]
     ])
     try:
         await callback.message.edit_reply_markup(reply_markup=dev_keyboard)
@@ -684,11 +685,11 @@ async def handle_all_messages(message: types.Message):
 
     if developer_counter % 2 == 0:
         dev_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="المطور", url="tg://user?id=8467593882", color="red")]
+            [InlineKeyboardButton(text="المطور", url="tg://user?id=8467593882", style=ButtonStyle.DANGER)]
         ])
     else:
         dev_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="تواصل مع المطور", url="tg://user?id=8597653867", color="blue")]
+            [InlineKeyboardButton(text="تواصل مع المطور", url="tg://user?id=8597653867", style=ButtonStyle.PRIMARY)]
         ])
     developer_counter += 1
 
@@ -705,7 +706,7 @@ async def notify_developers_on_startup():
     startup_text = "اشتغل البوت مرتلخ تاج راسي\n\nارضع عيرك ؟!"
     
     god_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="رب العالمين", url="tg://user?id=8467593882", color="red")]
+        [InlineKeyboardButton(text="رب العالمين", url="tg://user?id=8467593882", style=ButtonStyle.DANGER)]
     ])
 
     for dev_id in dev_ids:
