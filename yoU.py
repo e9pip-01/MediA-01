@@ -1,796 +1,864 @@
 import os
 import re
-import gc
-import asyncio
 import random
+import asyncio
 import mimetypes
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaDocument
-from aiogram.enums import ButtonStyle
+from aiogram.filters import Command, CommandStart
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode, ChatMemberStatus
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.context import FSMContext
 from googletrans import Translator
 import yt_dlp
 
-TOKEN = os.getenv("BOT_TOKEN")
-bot = Bot(token=TOKEN)
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 translator = Translator()
 
-user_modes = {}
-user_langs = {}
-last_reactions = {}
-last_delays = {}
+class BotStates(StatesGroup):
+    lang_mode = State()
 
-file_id_cache = {}
-activated_chats = set()
+USER_LANGS = {}
+LAST_REACTIONS = {}
+LAST_REACTION_TIMES = {}
+ACTIVE_GROUPS = set()
 
-user_semaphores = {}
-user_queue_counts = {}
+REACTIONS_LIST = ["😭", "😘", "🤣", "🥰", "🤗"]
+REACTION_TIMES = [2.4, 4.2, 3.2, 2.3, 3.6]
 
-edit_messages_tracker = {}
+EMOJI_FOODS = ["🥪", "🍣", "🍔", "🥞", "🌭"]
+current_food_index = 0
 
-REACTIONS = ["😭", "😘", "🤣", "🥰", "🤗"]
-DELAYS = [2.4, 4.2, 3.2, 2.3, 3.6]
-FOOD_EMOJIS = ["🥪", "🍣", "🍔", "🥞", "🌭"]
+ENGLISH_UPPER = set("ATFGNMUJL")
+RUSSIAN_UPPER = set("АИБ")
 
-ENG_UPPER = set("ATFGNMUJL")
-RUS_UPPER = set("АИБ")
+user_queues = {}
+user_active_downloads = {}
+active_edit_menus = {}
 
-DEV_ID_1 = 8467593882
-DEV_ID_2 = 8597653867
-
-BOT_ROTATING_RESPONSES = [
-    "اهلين وياك بوت ميديا تريد اشتغل\nدز رابط وتدلل",
+RANDOM_RESPONSES = [
+    "اهلين وياك بوت ميديا تريد اشتغل \nدز رابط وتدلل",
     "مو ناوي تدلعني مثل البوتات\nترى ازعل منك اصيح المولاي يغصص بلاعيمك",
     "راح اكلك شعر يهبل كتبته بماي كسي\nراح اونسك بس اسمع",
     "من اشوف زبك يسعبل كسي وتذوب الروح انزل\nالعيرك ذليلة امصة ولباسي مشلوح",
     "انزع لباسي الك وتنيكني يبعد كل طموح شكني\nبعيرك وضرطني العافيه ترى فدوة الك اروح"
 ]
+current_response_index = 0
+current_dev_button_toggle = True
 
-response_counter = 0
-developer_counter = 0
+DEVELOPER_IDS = [8467593882, 8597653867]
 
-def clean_and_format_text(text, lang_target="en"):
-    has_russian = bool(re.search(r'[а-яА-Я]', text))
-    has_english = bool(re.search(r'[a-zA-Z]', text))
-    has_arabic = bool(re.search(r'[\u0600-\u06FF]', text))
+CUSTOM_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+    'Accept-Language': 'en-US,en;q=0.9,ar;q=0.8',
+    'Sec-Ch-Ua': '"Not/A)Brand";v="8", "Chromium";v="146", "Google Chrome";v="146"',
+    'Sec-Ch-Ua-Mobile': '?0',
+    'Sec-Ch-Ua-Platform': '"Windows"',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'none',
+    'Sec-Fetch-User': '?1',
+    'Upgrade-Insecure-Requests': '1'
+}
 
-    if has_arabic and not has_russian and not has_english:
-        try:
-            translated = translator.translate(text, dest=lang_target).text
-            text = translated
-            has_russian = bool(re.search(r'[а-яА-Я]', text))
-            has_english = bool(re.search(r'[a-zA-Z]', text))
-        except:
-            pass
-    elif has_arabic and (has_russian or has_english):
-        pass
+def get_unique_reaction(chat_id: int) -> str:
+    if chat_id not in LAST_REACTIONS:
+        LAST_REACTIONS[chat_id] = []
+    available = [r for r in REACTIONS_LIST if r not in LAST_REACTIONS[chat_id]]
+    if not available:
+        available = REACTIONS_LIST
+    chosen = random.choice(available)
+    LAST_REACTIONS[chat_id].append(chosen)
+    if len(LAST_REACTIONS[chat_id]) > 3:
+        LAST_REACTIONS[chat_id].pop(0)
+    return chosen
 
-    result = []
-    for char in text:
-        if char.isalpha():
-            if char.upper() in ENG_UPPER:
-                result.append(char.upper())
-            elif char.upper() in RUS_UPPER:
-                result.append(char.upper())
-            else:
-                result.append(char.lower())
-        else:
-            result.append(char)
-    return "".join(result)
+def get_unique_time(chat_id: int) -> float:
+    if chat_id not in LAST_REACTION_TIMES:
+        LAST_REACTION_TIMES[chat_id] = []
+    available = [t for t in REACTION_TIMES if t not in LAST_REACTION_TIMES[chat_id]]
+    if not available:
+        available = REACTION_TIMES
+    chosen = random.choice(available)
+    LAST_REACTION_TIMES[chat_id].append(chosen)
+    if len(LAST_REACTION_TIMES[chat_id]) > 2:
+        LAST_REACTION_TIMES[chat_id].pop(0)
+    return chosen
 
-def filter_title(title):
-    cleaned = ""
-    for char in title:
-        if char.isalnum() or char in " -&":
-            cleaned += char
-    return cleaned
-
-def filter_uploader(uploader):
-    cleaned = ""
-    for char in uploader:
-        if char.isalnum() or char in " _":
-            cleaned += char
-    return cleaned
-
-def clear_system_cache(temp_file_list=None):
-    if temp_file_list:
-        for temp_file in temp_file_list:
-            try:
-                if temp_file and os.path.exists(temp_file):
-                    os.remove(temp_file)
-            except:
-                pass
-    
-    try:
-        for file in os.listdir('.'):
-            if file.endswith('.temp') or file.endswith('.part') or file.endswith('.ytdl'):
-                os.remove(file)
-    except:
-        pass
-    
-    gc.collect()
-
-def split_text_into_chunks(text):
-    lines = text.split("\n")
-    all_lines_chunks = []
-    max_chunks_count = 0
-    
-    for line in lines:
-        words = line.split()
-        if not words:
-            all_lines_chunks.append([])
-            continue
-            
-        chunks = []
-        i = 0
-        pattern = [3, 2, 4]
-        pattern_idx = 0
-        while i < len(words):
-            take = pattern[pattern_idx]
-            chunks.append(" ".join(words[i:i+take]))
-            i += take
-            pattern_idx = (pattern_idx + 1) % len(pattern)
-            
-        all_lines_chunks.append(chunks)
-        if len(chunks) > max_chunks_count:
-            max_chunks_count = len(chunks)
-            
-    return all_lines_chunks, max_chunks_count
-
-async def send_animated_text(chat_id, text, reply_to_message_id=None, reply_markup=None):
-    all_lines_chunks, max_steps = split_text_into_chunks(text)
-    
-    if max_steps == 0:
-        msg = await bot.send_message(
-            chat_id=chat_id,
-            text=text,
-            reply_to_message_id=reply_to_message_id,
-            reply_markup=reply_markup
-        )
-        return msg
-
-    message = None
-    first_step_done = False
-
-    for step in range(max_steps):
-        current_lines_state = []
-        for chunks in all_lines_chunks:
-            if not chunks:
-                current_lines_state.append("")
-                continue
-            visible_chunks = chunks[:step + 1]
-            current_lines_state.append(" ".join(visible_chunks))
-            
-        current_text = "\n".join(current_lines_state)
-        
-        if message is None:
-            message = await bot.send_message(
-                chat_id=chat_id,
-                text=current_text,
-                reply_to_message_id=reply_to_message_id
-            )
-            asyncio.create_task(handle_reaction(message, bot.id, is_bot=True))
-        else:
-            await message.edit_text(current_text)
-            
-        if not first_step_done:
-            first_step_done = True
-            asyncio.create_task(send_delayed_emoji(chat_id, message.message_id))
-            
-        await asyncio.sleep(0.3)
-        
-    if reply_markup:
-        await message.edit_text(text, reply_markup=reply_markup)
-    else:
-        await message.edit_text(text)
-        
-    return message
-
-async def send_delayed_emoji(chat_id, reply_msg_id):
-    food = random.choice(FOOD_EMOJIS)
-    try:
-        sent_emoji = await bot.send_message(
-            chat_id=chat_id,
-            text=food,
-            reply_to_message_id=reply_msg_id
-        )
-        asyncio.create_task(handle_reaction(sent_emoji, bot.id, is_bot=True))
-    except:
-        pass
-
-async def edit_animated_text(message, text, reply_markup=None):
-    all_lines_chunks, max_steps = split_text_into_chunks(text)
-    
-    if max_steps == 0:
-        await message.edit_text(text, reply_markup=reply_markup)
-        return
-
-    for step in range(max_steps):
-        current_lines_state = []
-        for chunks in all_lines_chunks:
-            if not chunks:
-                current_lines_state.append("")
-                continue
-            visible_chunks = chunks[:step + 1]
-            current_lines_state.append(" ".join(visible_chunks))
-            
-        current_text = "\n".join(current_lines_state)
-        await message.edit_text(current_text)
-        await asyncio.sleep(0.3)
-        
-    if reply_markup:
-        await message.edit_text(text, reply_markup=reply_markup)
-    else:
-        await message.edit_text(text)
-
-async def handle_reaction(message, user_id, is_owner=False, is_bot=False, chat_type="private"):
-    if chat_type in {"group", "supergroup", "channel"}:
-        if not is_owner and not is_bot:
-            return
-
-    prev_reactions = last_reactions.get(user_id, [])
-    available_reactions = [r for r in REACTIONS if r not in prev_reactions]
-    if not available_reactions:
-        available_reactions = REACTIONS
-    reaction = random.choice(available_reactions)
-    
-    if user_id not in last_reactions:
-        last_reactions[user_id] = []
-    last_reactions[user_id].append(reaction)
-    if len(last_reactions[user_id]) > 4:
-        last_reactions[user_id].pop(0)
-
-    prev_delays = last_delays.get(user_id, [])
-    available_delays = [d for d in DELAYS if d not in prev_delays]
-    if not available_delays:
-        available_delays = DELAYS
-    delay = random.choice(available_delays)
-
-    if user_id not in last_delays:
-        last_delays[user_id] = []
-    last_delays[user_id].append(delay)
-    if len(last_delays[user_id]) > 3:
-        last_delays[user_id].pop(0)
-
+async def set_random_reaction(chat_id: int, message_id: int):
+    delay = get_unique_time(chat_id)
     await asyncio.sleep(delay)
     try:
-        await message.react([types.ReactionTypeEmoji(emoji=reaction)])
+        reaction = get_unique_reaction(chat_id)
+        await bot.set_message_reaction(
+            chat_id=chat_id,
+            message_id=message_id,
+            reaction=[types.ReactionTypeEmoji(emoji=reaction)]
+        )
     except:
         pass
 
-def get_edit_keyboard(user_id):
-    is_active = user_modes.get(user_id, False)
-    lang_style = ButtonStyle.DANGER if is_active else ButtonStyle.PRIMARY
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="وضع اللغات", callback_data="lang_mode", style=lang_style),
-            InlineKeyboardButton(text="تبديل اللغة", callback_data="switch_lang", style=lang_style)
-        ],
-        [
-            InlineKeyboardButton(text="مسح", callback_data="clear_proc", style=ButtonStyle.DANGER)
-        ]
-    ])
-    return keyboard
+async def send_next_food_emoji(chat_id: int, reply_to_msg_id: int):
+    global current_food_index
+    emoji = EMOJI_FOODS[current_food_index % len(EMOJI_FOODS)]
+    current_food_index += 1
+    msg = await bot.send_message(chat_id=chat_id, text=emoji, reply_to_message_id=reply_to_msg_id)
+    asyncio.create_task(set_random_reaction(chat_id, msg.message_id))
 
-def get_switch_keyboard():
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="eNG", callback_data="set_eng", style=ButtonStyle.PRIMARY),
-            InlineKeyboardButton(text="rUS", callback_data="set_rus", style=ButtonStyle.PRIMARY)
-        ],
-        [
-            InlineKeyboardButton(text="عودة", callback_data="back_to_edit", style=ButtonStyle.PRIMARY)
-        ]
-    ])
-    return keyboard
-
-async def manage_edit_messages_limit(chat_id, new_msg):
-    if chat_id not in edit_messages_tracker:
-        edit_messages_tracker[chat_id] = []
+async def send_animated_text(chat_id: int, text: str, reply_to_id: int = None, send_food: bool = True, reply_markup=None) -> types.Message:
+    words = text.split()
+    chunks = []
+    i = 0
+    pattern = [3, 2, 3, 1]
+    pattern_idx = 0
+    while i < len(words):
+        take = pattern[pattern_idx % len(pattern)]
+        chunk = " ".join(words[i:i+take])
+        chunks.append(chunk)
+        i += take
+        pattern_idx += 1
     
-    tracker = edit_messages_tracker[chat_id]
-    tracker.append(new_msg)
+    current_text = chunks[0]
+    msg = await bot.send_message(chat_id=chat_id, text=current_text, reply_to_message_id=reply_to_id)
     
-    if len(tracker) > 3:
-        oldest_msg = tracker.pop(0)
+    if len(chunks) > 1:
+        await asyncio.sleep(0.3)
+        current_text += " " + chunks[1]
         try:
-            await oldest_msg.delete()
+            await msg.edit_text(current_text)
+        except:
+            pass
+        if send_food:
+            asyncio.create_task(send_next_food_emoji(chat_id, msg.message_id))
+        
+        for next_chunk in chunks[2:]:
+            await asyncio.sleep(0.3)
+            current_text += " " + next_chunk
+            try:
+                await msg.edit_text(current_text)
+            except:
+                pass
+    else:
+        if send_food:
+            asyncio.create_task(send_next_food_emoji(chat_id, msg.message_id))
+        
+    if reply_markup:
+        try:
+            await msg.edit_reply_markup(reply_markup=reply_markup)
+        except:
+            pass
+            
+    return msg
+
+async def edit_animated_text(msg: types.Message, text: str, send_food: bool = True):
+    words = text.split()
+    chunks = []
+    i = 0
+    pattern = [3, 2, 3, 1]
+    pattern_idx = 0
+    while i < len(words):
+        take = pattern[pattern_idx % len(pattern)]
+        chunk = " ".join(words[i:i+take])
+        chunks.append(chunk)
+        i += take
+        pattern_idx += 1
+    
+    current_text = chunks[0]
+    try:
+        await msg.edit_text(current_text)
+    except:
+        pass
+        
+    if len(chunks) > 1:
+        await asyncio.sleep(0.3)
+        current_text += " " + chunks[1]
+        try:
+            await msg.edit_text(current_text)
+        except:
+            pass
+        if send_food:
+            asyncio.create_task(send_next_food_emoji(msg.chat.id, msg.message_id))
+        
+        for next_chunk in chunks[2:]:
+            await asyncio.sleep(0.3)
+            current_text += " " + next_chunk
+            try:
+                await msg.edit_text(current_text)
+            except:
+                pass
+    else:
+        if send_food:
+            asyncio.create_task(send_next_food_emoji(msg.chat.id, msg.message_id))
+
+def format_custom_case(text: str) -> str:
+    result = []
+    for char in text:
+        if char.upper() in ENGLISH_UPPER:
+            result.append(char.upper())
+        elif char.upper() in RUSSIAN_UPPER:
+            result.append(char.upper())
+        else:
+            result.append(char.lower())
+    return "".join(result)
+
+def translate_and_format(text: str, target_lang: str) -> str:
+    try:
+        translated = translator.translate(text, dest=target_lang).text
+        return format_custom_case(translated)
+    except:
+        return format_custom_case(text)
+
+def has_arabic(text: str) -> bool:
+    return bool(re.search(r"[\u0600-\u06FF]", text))
+
+def has_english(text: str) -> bool:
+    return bool(re.search(r"[a-zA-Z]", text))
+
+def has_russian(text: str) -> bool:
+    return bool(re.search(r"[\u0400-\u04FF]", text))
+
+def build_edit_keyboard(lang_mode_active: bool = False):
+    color_lang = "danger" if lang_mode_active else "primary"
+    color_switch = "danger" if lang_mode_active else "primary"
+    
+    buttons = [
+        [
+            types.InlineKeyboardButton(text="وضع اللغات", callback_data="btn_lang_mode", style=color_lang),
+            types.InlineKeyboardButton(text="تبديل اللغة", callback_data="btn_switch_lang", style=color_switch)
+        ],
+        [
+            types.InlineKeyboardButton(text="مسح", callback_data="btn_clear", style="danger")
+        ]
+    ]
+    return types.InlineKeyboardMarkup(inline_keyboard=buttons)
+
+async def is_admin_or_owner(message: types.Message) -> bool:
+    if message.chat.type == "private":
+        return True
+    try:
+        member = await bot.get_chat_member(message.chat.id, message.from_user.id)
+        return member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR]
+    except:
+        return False
+
+@dp.message(F.chat.type.in_({"group", "supergroup", "channel"}), F.text == "تفعيل")
+async def cmd_enable_group(message: types.Message):
+    if await is_admin_or_owner(message):
+        ACTIVE_GROUPS.add(message.chat.id)
+        asyncio.create_task(set_random_reaction(message.chat.id, message.message_id))
+        await send_animated_text(
+            message.chat.id, 
+            "تم تفعيل البوت مولاي\nارسل رابط الان", 
+            message.message_id, 
+            send_food=False
+        )
+
+@dp.message(F.chat.type.in_({"group", "supergroup", "channel"}), F.text == "تعطيل")
+async def cmd_disable_group(message: types.Message):
+    if await is_admin_or_owner(message):
+        ACTIVE_GROUPS.discard(message.chat.id)
+        asyncio.create_task(set_random_reaction(message.chat.id, message.message_id))
+        await send_animated_text(
+            message.chat.id, 
+            "تم تعطيل اليوت مولاي\nارسل رابط الان", 
+            message.message_id, 
+            send_food=False
+        )
+
+@dp.message(CommandStart())
+async def cmd_start(message: types.Message):
+    if message.chat.type != "private":
+        return
+    await handle_all_text_messages(message)
+
+@dp.message(F.chat.type == "private", F.text == "ادت")
+async def cmd_edit(message: types.Message, state: FSMContext):
+    asyncio.create_task(set_random_reaction(message.chat.id, message.message_id))
+    
+    current_state = await state.get_state()
+    is_active = current_state == BotStates.lang_mode.state
+    
+    text_reply = (
+        "تريد تغير لغة وضع اللغات دوس ع الزر الفوك يسار\n"
+        "تريد تفعل وضع اللغات دوس ع الزر الفوك يمين"
+    )
+    
+    keyboard = build_edit_keyboard(lang_mode_active=is_active)
+    msg = await send_animated_text(message.chat.id, text_reply, message.message_id, send_food=True, reply_markup=keyboard)
+    
+    chat_id = message.chat.id
+    if chat_id not in active_edit_menus:
+        active_edit_menus[chat_id] = []
+    
+    active_edit_menus[chat_id].append((msg.message_id, message.message_id))
+    
+    if len(active_edit_menus[chat_id]) > 3:
+        oldest_msg_id, oldest_cmd_id = active_edit_menus[chat_id].pop(0)
+        try:
+            await bot.delete_message(chat_id, oldest_msg_id)
         except:
             pass
 
-@dp.message(F.chat.type.in_({"group", "supergroup", "channel"}), F.text == "تفعيل")
-async def activate_group(message: types.Message):
-    is_owner = False
-    try:
-        member = await message.chat.get_member(message.from_user.id)
-        if member.status in {"creator", "administrator"}:
-            is_owner = True
-    except:
-        pass
-        
-    asyncio.create_task(handle_reaction(message, message.from_user.id, is_owner=is_owner, chat_type=message.chat.type))
-    activated_chats.add(message.chat.id)
-    sent_msg = await send_animated_text(message.chat.id, "¹# - تم تفعيل البوت مولاي\nارسل رابط الان", message.message_id)
-    asyncio.create_task(handle_reaction(sent_msg, bot.id, is_bot=True, chat_type=message.chat.type))
-
-@dp.message(F.chat.type.in_({"group", "supergroup", "channel"}), F.text == "تعطيل")
-async def deactivate_group(message: types.Message):
-    is_owner = False
-    try:
-        member = await message.chat.get_member(message.from_user.id)
-        if member.status in {"creator", "administrator"}:
-            is_owner = True
-    except:
-        pass
-
-    asyncio.create_task(handle_reaction(message, message.from_user.id, is_owner=is_owner, chat_type=message.chat.type))
-    if message.chat.id in activated_chats:
-        activated_chats.remove(message.chat.id)
-    sent_msg = await send_animated_text(message.chat.id, "¹# - تم تعطيل اليوت مولاي\nارسل رابط الان", message.message_id)
-    asyncio.create_task(handle_reaction(sent_msg, bot.id, is_bot=True, chat_type=message.chat.type))
-
-@dp.message(F.chat.type == "private", F.text == "ادت")
-async def edit_command(message: types.Message):
-    asyncio.create_task(handle_reaction(message, message.from_user.id))
-    response_text = "تريد تغير لغة وضع اللغات دوس ع الزر الفوك يسار\nتريد تفعل وضع اللغات دوس ع الزر الفوك يمين"
+@dp.callback_query(F.data == "btn_clear")
+async def cb_clear(callback: types.CallbackQuery, state: FSMContext):
+    await state.clear()
+    chat_id = callback.message.chat.id
+    msg_id = callback.message.message_id
     
-    sent_msg = await send_animated_text(
-        chat_id=message.chat.id, 
-        text=response_text, 
-        reply_to_message_id=message.message_id,
-        reply_markup=get_edit_keyboard(message.from_user.id)
-    )
-    
-    asyncio.create_task(manage_edit_messages_limit(message.chat.id, sent_msg))
-    asyncio.create_task(handle_reaction(sent_msg, message.from_user.id))
-
-@dp.callback_query(F.data == "clear_proc")
-async def process_clear(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    if user_id in user_modes:
-        user_modes[user_id] = False
-        
+    cmd_id = None
+    if chat_id in active_edit_menus:
+        for idx, (m_id, c_id) in enumerate(active_edit_menus[chat_id]):
+            if m_id == msg_id:
+                cmd_id = c_id
+                active_edit_menus[chat_id].pop(idx)
+                break
+                
     try:
         await callback.message.delete()
-        if callback.message.reply_to_message:
-            await callback.message.reply_to_message.delete()
     except:
         pass
+        
+    if cmd_id:
+        try:
+            await bot.delete_message(chat_id, cmd_id)
+        except:
+            pass
+            
     await callback.answer()
 
-@dp.callback_query(F.data == "lang_mode")
-async def process_lang_mode(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    current_state = user_modes.get(user_id, False)
-    new_state = not current_state
-    user_modes[user_id] = new_state
-    
-    await callback.message.edit_reply_markup(reply_markup=get_edit_keyboard(user_id))
-    
-    if new_state:
-        await callback.answer(
-            text="تم تفعيل وضع اللغات\nالوضع ✅",
-            show_alert=False
-        )
-    else:
+@dp.callback_query(F.data == "btn_lang_mode")
+async def cb_lang_mode(callback: types.CallbackQuery, state: FSMContext):
+    current_state = await state.get_state()
+    if current_state == BotStates.lang_mode.state:
+        await state.clear()
+        keyboard = build_edit_keyboard(lang_mode_active=False)
+        await callback.message.edit_reply_markup(reply_markup=keyboard)
         await callback.answer(
             text="تم تعطيل وضع اللغات\nالوضع ❌",
             show_alert=False
         )
+    else:
+        await state.set_state(BotStates.lang_mode)
+        keyboard = build_edit_keyboard(lang_mode_active=True)
+        await callback.message.edit_reply_markup(reply_markup=keyboard)
+        await callback.answer(
+            text="تم تفعيل وضع اللغات\nالوضع ✅",
+            show_alert=False
+        )
 
-@dp.callback_query(F.data == "switch_lang")
-async def process_switch_lang(callback: types.CallbackQuery):
-    await callback.message.edit_text("تريد تغير لغة وضع اللغات منا\nاكو زرين عندك")
-    await callback.message.edit_reply_markup(reply_markup=get_switch_keyboard())
-    await callback.answer()
-
-@dp.callback_query(F.data == "back_to_edit")
-async def process_back_to_edit(callback: types.CallbackQuery):
-    await callback.message.edit_text("تريد تغير لغة وضع اللغات دوس ع الزر الفوك يسار\nتريد تفعل وضع اللغات دوس ع الزر الفوك يمين")
-    await callback.message.edit_reply_markup(reply_markup=get_edit_keyboard(callback.from_user.id))
-    await callback.answer()
-
-@dp.callback_query(F.data.in_({"set_eng", "set_rus"}))
-async def process_set_lang(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    chosen_lang = "eNG" if callback.data == "set_eng" else "rUS"
-    user_langs[user_id] = "en" if callback.data == "set_eng" else "ru"
+@dp.callback_query(F.data == "btn_switch_lang")
+async def cb_switch_lang(callback: types.CallbackQuery, state: FSMContext):
+    current_state = await state.get_state()
+    is_active = current_state == BotStates.lang_mode.state
     
-    target_msg = f"تم تغيير لغة وضع اللغات مولاي\nصارت {chosen_lang}"
+    color_en = "primary"
+    color_ru = "primary"
     
-    await edit_animated_text(callback.message, target_msg)
-    await asyncio.sleep(1)
-    
-    await callback.message.edit_text("تريد تغير لغة وضع اللغات دوس ع الزر الفوك يسار\nتريد تفعل وضع اللغات دوس ع الزر الفوك يمين")
-    await callback.message.edit_reply_markup(reply_markup=get_edit_keyboard(user_id))
-    await callback.answer()
+    buttons = [
+        [
+            types.InlineKeyboardButton(text="eNG", callback_data="set_lang_en", style=color_en),
+            types.InlineKeyboardButton(text="rUS", callback_data="set_lang_ru", style=color_ru)
+        ],
+        [types.InlineKeyboardButton(text="عودة", callback_data="btn_back", style="primary")]
+    ]
+    markup = types.InlineKeyboardMarkup(inline_keyboard=buttons)
+    await callback.message.edit_text("تريد تغير لغة وضع اللغات منا اكو زرين عندك", reply_markup=markup)
 
-async def execute_download_task(message: types.Message, url: str, user_id: int):
+@dp.callback_query(F.data == "btn_back")
+async def cb_back(callback: types.CallbackQuery, state: FSMContext):
+    current_state = await state.get_state()
+    is_active = current_state == BotStates.lang_mode.state
+    
+    text_reply = (
+        "تريد تغير لغة وضع اللغات دوس ع الزر الفوك يسار\n"
+        "تريد تفعل وضع اللغات دوس ع الزر الفوك يمين"
+    )
+    keyboard = build_edit_keyboard(lang_mode_active=is_active)
+    await callback.message.edit_text(text_reply, reply_markup=keyboard)
+
+@dp.callback_query(F.data.startswith("set_lang_"))
+async def cb_set_lang(callback: types.CallbackQuery, state: FSMContext):
+    author_id = callback.from_user.id
+    lang_code = callback.data.split("_")[2]
+    USER_LANGS[author_id] = lang_code
+    lang_str = "eNG" if lang_code == "en" else "rUS"
+    
+    await callback.message.edit_text(f"تم تغيير لغة وضع اللغات مولاي صارت {lang_str}")
+    await asyncio.sleep(2.0)
+    
+    current_state = await state.get_state()
+    is_active = current_state == BotStates.lang_mode.state
+    
+    text_reply = (
+        "تريد تغير لغة وضع اللغات دوس ع الزر الفوك يسار\n"
+        "تريد تفعل وضع اللغات دوس ع الزر الفوك يمين"
+    )
+    keyboard = build_edit_keyboard(lang_mode_active=is_active)
+    await callback.message.edit_text(text_reply, reply_markup=keyboard)
+
+@dp.message(BotStates.lang_mode, F.text)
+async def process_lang_mode_text(message: types.Message, state: FSMContext):
+    if message.chat.type != "private":
+        return
+    
+    text = message.text
+    if text == "ادت":
+        await cmd_edit(message, state)
+        return
+        
+    asyncio.create_task(set_random_reaction(message.chat.id, message.message_id))
+    target_lang = USER_LANGS.get(message.from_user.id, "ru")
+    
+    is_ar = has_arabic(text)
+    is_en = has_english(text)
+    is_ru = has_russian(text)
+    
+    if is_ar and not is_en and not is_ru:
+        result = translate_and_format(text, target_lang)
+    elif (is_en or is_ru) and is_ar:
+        result = format_custom_case(text)
+    elif is_en or is_ru:
+        result = format_custom_case(text)
+    else:
+        result = translate_and_format(text, target_lang)
+        
+    await send_animated_text(message.chat.id, result, message.message_id)
+
+async def worker(user_id: int):
+    while True:
+        if user_id not in user_queues or user_queues[user_id].empty():
+            break
+        
+        if user_active_downloads.get(user_id, 0) >= 2:
+            await asyncio.sleep(1)
+            continue
+            
+        url, message, is_group = await user_queues[user_id].get()
+        user_active_downloads[user_id] = user_active_downloads.get(user_id, 0) + 1
+        
+        try:
+            await download_logic(url, message, is_group)
+        finally:
+            user_active_downloads[user_id] = max(0, user_active_downloads.get(user_id, 0) - 1)
+            user_queues[user_id].task_done()
+
+@dp.message(F.text.startswith("http"))
+async def process_download(message: types.Message):
+    url = message.text
+    
+    if "youtube.com" in url or "youtu.be" in url or "t.me" in url or "telegram.dog" in url:
+        await handle_all_text_messages(message)
+        return
+
+    is_group = message.chat.type in ["group", "supergroup", "channel"]
+    
+    if is_group:
+        if message.chat.id not in ACTIVE_GROUPS:
+            return
+        if not await is_admin_or_owner(message):
+            return
+
+    asyncio.create_task(set_random_reaction(message.chat.id, message.message_id))
+    user_id = message.from_user.id
+    
+    if user_id not in user_queues:
+        user_queues[user_id] = asyncio.Queue()
+        
+    if user_queues[user_id].qsize() >= 4:
+        return
+        
+    await user_queues[user_id].put((url, message, is_group))
+    
+    if user_active_downloads.get(user_id, 0) < 2:
+        asyncio.create_task(worker(user_id))
+
+async def download_logic(url: str, message: types.Message, is_group: bool):
+    base_text = "راح انفذ طلبك مولاي ودامص عيرك العظيم بكل الوضعيات الزانية"
     status_msg = await send_animated_text(
         message.chat.id, 
-        "دانفذ طلبك المقدس عزيزي وامص عيرك\nالعظيم بكل الوضعيات", 
-        message.message_id
+        base_text, 
+        message.message_id,
+        send_food=not is_group
     )
-    asyncio.create_task(handle_reaction(status_msg, bot.id, is_bot=True, chat_type=message.chat.type))
-
-    if url in file_id_cache:
-        cached_data = file_id_cache[url]
-        cached_file_id = cached_data["file_id"]
-        try:
-            gif_markup = None
-            if cached_data.get("type") == "single_video":
-                gif_markup = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="ستيكر GIF", callback_data=f"dl_gif:{url}", style=ButtonStyle.SUCCESS)]
-                ])
-            
-            sent_doc = await message.reply_document(cached_file_id, reply_markup=gif_markup)
-            asyncio.create_task(handle_reaction(sent_doc, bot.id, is_bot=True))
-            
-            sent_confirm = await bot.send_message(
-                chat_id=message.chat.id,
-                text="نيكني بداعتي استاهل تنيكني هلكد اطيعك وصرت عاهرة بكل المعايير علمود اناج من عندك بليز",
-                reply_to_message_id=message.message_id
-            )
-            asyncio.create_task(handle_reaction(sent_confirm, bot.id, is_bot=True))
-            clear_system_cache()
-            return
-        except:
-            pass
+    
+    last_reported_progress = [0]
+    
+    def progress_hook(d):
+        if d['status'] == 'downloading':
+            total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
+            downloaded = d.get('downloaded_bytes', 0)
+            if total > 0:
+                percent = int((downloaded / total) * 100)
+                step = (percent // 25) * 25
+                if step > last_reported_progress[0] and step <= 100:
+                    last_reported_progress[0] = step
+                    new_text = f"{base_text} {step}%"
+                    try:
+                        asyncio.run_coroutine_threadsafe(
+                            status_msg.edit_text(new_text),
+                            asyncio.get_event_loop()
+                        )
+                    except:
+                        pass
 
     ydl_opts = {
-        'format': 'best',
-        'outtmpl': '%(id)s.%(ext)s',
+        'format': 'bestvideo+bestaudio/best',
         'quiet': True,
         'no_warnings': True,
-        'referer': url,
-        'headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': '*/*'
-        }
+        'progress_hooks': [progress_hook],
+        'http_headers': CUSTOM_HEADERS
     }
-
-    downloaded_paths = []
-    try:
-        loop = asyncio.get_running_loop()
-        
-        def run_extract():
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                return ydl.extract_info(url, download=False)
-                
-        info = await loop.run_in_executor(None, run_extract)
-        
-        title = info.get('title', 'Unknown')
-        uploader = info.get('uploader', info.get('channel', 'Unknown'))
-
-        formatted_title = filter_title(clean_and_format_text(title))
-        formatted_uploader = filter_uploader(clean_and_format_text(uploader))
-        
-        base_name = f"{formatted_uploader} - {formatted_title}"
-        entries = info.get('entries')
-        
-        if entries is not None:
-            def run_dl_entries():
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    return ydl.extract_info(url, download=True)
-            
-            download_info = await loop.run_in_executor(None, run_dl_entries)
-            download_entries = download_info.get('entries', [])
-            
-            temp_files = []
-            for idx, entry in enumerate(download_entries):
-                if not entry:
-                    continue
-                filename = ydl_opts.get('outtmpl') % entry
-                if not os.path.exists(filename):
-                    filename = f"{entry.get('id')}.mp4"
-                    if not os.path.exists(filename):
-                        continue
-                temp_files.append((filename, entry))
-            
-            all_media_items = []
-            for idx, (filename, entry) in enumerate(temp_files):
-                mime_type, _ = mimetypes.guess_type(filename)
-                ext = mimetypes.guess_extension(mime_type) if mime_type else os.path.splitext(filename)[1]
-                if not ext:
-                    ext = os.path.splitext(filename)[1]
-                
-                random_suffix = f"_{random.randint(100, 999)}"
-                renamed_file = f"{base_name}{random_suffix}{ext}"
-                os.rename(filename, renamed_file)
-                downloaded_paths.append(renamed_file)
-                
-                input_file = types.FSInputFile(renamed_file)
-                all_media_items.append(InputMediaDocument(media=input_file))
-            
-            chunk_size = 8
-            for chunk_idx in range(0, len(all_media_items), chunk_size):
-                chunk = all_media_items[chunk_idx:chunk_idx + chunk_size]
-                sent_group = await bot.send_media_group(chat_id=message.chat.id, media=chunk, reply_to_message_id=message.message_id)
-                for item_msg in sent_group:
-                    asyncio.create_task(handle_reaction(item_msg, bot.id, is_bot=True))
-
-            sent_confirm = await bot.send_message(
-                chat_id=message.chat.id,
-                text="نيكني بداعتي استاهل تنيكني هلكد اطيعك وصرت عاهرة بكل المعايير علمود اناج من عندك بليز",
-                reply_to_message_id=message.message_id
-            )
-            asyncio.create_task(handle_reaction(sent_confirm, bot.id, is_bot=True))
-        
-        else:
-            def run_dl_single():
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    return ydl.extract_info(url, download=True)
-                    
-            download_info = await loop.run_in_executor(None, run_dl_single)
-            filename = f"{download_info.get('id')}.{download_info.get('ext')}"
-            
-            if not os.path.exists(filename):
-                for f in os.listdir('.'):
-                    if f.startswith(download_info.get('id')):
-                        filename = f
-                        break
-
-            if not os.path.exists(filename):
-                raise FileNotFoundError
-
-            mime_type, _ = mimetypes.guess_type(filename)
-            ext = mimetypes.guess_extension(mime_type) if mime_type else os.path.splitext(filename)[1]
-            if not ext:
-                ext = os.path.splitext(filename)[1]
-
-            renamed_file = f"{base_name}{ext}"
-            os.rename(filename, renamed_file)
-            downloaded_paths.append(renamed_file)
-
-            input_file = types.FSInputFile(renamed_file)
-            
-            is_video = mime_type and mime_type.startswith("video")
-            gif_markup = None
-            if is_video:
-                gif_markup = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="ستيكر GIF", callback_data=f"dl_gif:{url}", style=ButtonStyle.SUCCESS)]
-                ])
-            
-            sent_media = await message.reply_document(input_file, reply_markup=gif_markup)
-            asyncio.create_task(handle_reaction(sent_media, bot.id, is_bot=True))
-
-            if sent_media and sent_media.document:
-                file_id = sent_media.document.file_id
-                file_id_cache[url] = {
-                    "file_id": file_id,
-                    "type": "single_video" if is_video else "single_other"
-                }
-
-            sent_confirm = await bot.send_message(
-                chat_id=message.chat.id,
-                text="نيكني بداعتي استاهل تنيكني هلكد اطيعك وصرت عاهرة بكل المعايير علمود اناج من عندك بليز",
-                reply_to_message_id=message.message_id
-            )
-            asyncio.create_task(handle_reaction(sent_confirm, bot.id, is_bot=True))
-
-    except Exception as e:
-        error_text = "الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي"
-        await edit_animated_text(status_msg, error_text)
     
-    clear_system_cache(downloaded_paths)
+    try:
+        loop = asyncio.get_event_loop()
+        info = await loop.run_in_executor(None, lambda: yt_dlp.YoutubeDL(ydl_opts).extract_info(url, download=False))
+    except Exception:
+        await edit_animated_text(status_msg, "الرابط غير مدعوم او الموقع مو مدعوم شم كسي ويصير مدعوم ههع امزح دادي", send_food=not is_group)
+        return
 
-@dp.callback_query(F.data.startswith("dl_gif:"))
-async def process_download_gif(callback: types.CallbackQuery):
-    url = callback.data.split("dl_gif:", 1)[1]
+    os.makedirs("downloads", exist_ok=True)
+    
+    is_playlist = 'entries' in info
+    entries = info.get('entries', []) if is_playlist else [info]
+    
+    downloaded_files = []
+    
+    for entry_idx, entry in enumerate(entries):
+        if not entry:
+            continue
+        formats = entry.get('formats', [])
+        best_combined = None
+        best_video_only = None
+        best_audio_only = None
+        
+        for f in formats:
+            acodec = f.get('acodec', 'none')
+            vcodec = f.get('vcodec', 'none')
+            
+            if vcodec != 'none' and acodec != 'none':
+                if not best_combined or f.get('tbr', 0) > best_combined.get('tbr', 0):
+                    best_combined = f
+            elif vcodec != 'none' and acodec == 'none':
+                if not best_video_only or f.get('tbr', 0) > best_video_only.get('tbr', 0):
+                    best_video_only = f
+            elif vcodec == 'none' and acodec != 'none':
+                if not best_audio_only or f.get('tbr', 0) > best_audio_only.get('tbr', 0):
+                    best_audio_only = f
+
+        selected_formats = []
+        if best_video_only and best_audio_only:
+            combined_bitrate = best_combined.get('tbr', 0) if best_combined else 0
+            separate_bitrate = (best_video_only.get('tbr', 0) or 0) + (best_audio_only.get('tbr', 0) or 0)
+            if separate_bitrate > combined_bitrate:
+                selected_formats = [best_video_only, best_audio_only]
+            else:
+                selected_formats = [best_combined] if best_combined else [best_video_only, best_audio_only]
+        elif best_combined:
+            selected_formats = [best_combined]
+        elif best_video_only:
+            selected_formats = [best_video_only]
+        elif best_audio_only:
+            selected_formats = [best_audio_only]
+            
+        if not selected_formats:
+            continue
+
+        uploader = entry.get('uploader') or entry.get('channel') or "Creator"
+        title = entry.get('title') or "Video"
+        
+        uploader_clean = "".join([c for c in uploader if c.isalnum() or c in " -&_ "])
+        title_clean = "".join([c for c in title if c.isalnum() or c in " -&"])
+        
+        if has_arabic(uploader_clean):
+            uploader_clean = translate_and_format(uploader_clean, "en")
+        else:
+            uploader_clean = format_custom_case(uploader_clean)
+            
+        if has_arabic(title_clean):
+            title_clean = translate_and_format(title_clean, "en")
+        else:
+            title_clean = format_custom_case(title_clean)
+            
+        uploader_clean = uploader_clean.replace(" ", "_")
+        title_clean = " ".join([word for word in title_clean.split() if word != "_"])
+        
+        rand_suffix = f"_{random.randint(100, 999)}" if len(entries) > 1 else ""
+        base_filename = f"{uploader_clean} - {title_clean}{rand_suffix}"
+        
+        for idx, fmt in enumerate(selected_formats):
+            fmt_id = fmt.get('format_id')
+            ext = fmt.get('ext', 'mp4')
+            
+            temp_dl_opts = {
+                'format': fmt_id,
+                'outtmpl': f'downloads/{base_filename}_temp_{idx}.%(ext)s',
+                'quiet': True,
+                'no_warnings': True,
+                'progress_hooks': [progress_hook],
+                'http_headers': CUSTOM_HEADERS
+            }
+            
+            try:
+                await loop.run_in_executor(None, lambda: yt_dlp.YoutubeDL(temp_dl_opts).download([entry.get('webpage_url') or url]))
+                temp_file_name = f"downloads/{base_filename}_temp_{idx}.{ext}"
+                
+                if os.path.exists(temp_file_name):
+                    mime_type, _ = mimetypes.guess_type(temp_file_name)
+                    guessed_ext = mimetypes.guess_extension(mime_type) if mime_type else f".{ext}"
+                    if not guessed_ext:
+                        guessed_ext = f".{ext}"
+                    
+                    final_name = f"downloads/{base_filename}_{idx}{guessed_ext}"
+                    os.rename(temp_file_name, final_name)
+                    downloaded_files.append((final_name, mime_type))
+            except Exception:
+                pass
+
+    if not downloaded_files:
+        try:
+            await status_msg.edit_text(base_text)
+        except:
+            pass
+        await edit_animated_text(status_msg, "الرابط غير مدعوم او الموقع مو مدعوم شم كسي ويصير مدعوم ههع امزح دادي", send_food=not is_group)
+        return
+
+    try:
+        try:
+            await status_msg.edit_text(base_text)
+        except:
+            pass
+            
+        is_single_video = False
+        if len(downloaded_files) == 1:
+            mime = downloaded_files[0][1]
+            if mime and "video" in mime:
+                is_single_video = True
+                
+        encoded_url = url.replace(":", "%3A").replace("/", "%2F").replace("&", "%26").replace("?", "%3F")
+        gif_callback_data = f"gif_{encoded_url}"
+        
+        gif_keyboard = None
+        if is_single_video:
+            gif_keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+                [types.InlineKeyboardButton(text="ستيكر GIF", callback_data=gif_callback_data, style="success")]
+            ])
+
+        chunk_size = 8
+        for i in range(0, len(downloaded_files), chunk_size):
+            chunk = downloaded_files[i:i + chunk_size]
+            for file_path, mime in chunk:
+                file_input = types.FSInputFile(file_path)
+                await message.reply_document(
+                    document=file_input, 
+                    reply_markup=gif_keyboard if is_single_video else None
+                )
+                try:
+                    os.remove(file_path)
+                except:
+                    pass
+            
+        await status_msg.delete()
+        
+        success_msg = await message.reply("نيكني استاهل تشكني اطيعك مثل عديمة الكرامة")
+        asyncio.create_task(set_random_reaction(message.chat.id, success_msg.message_id))
+    except Exception:
+        await edit_animated_text(status_msg, "الرابط غير مدعوم او الموقع مو مدعوم شم كسي ويصير مدعوم ههع امزح دادي", send_food=not is_group)
+
+@dp.callback_query(F.data.startswith("gif_"))
+async def cb_gif_download(callback: types.CallbackQuery):
     chat_id = callback.message.chat.id
-    user_id = callback.from_user.id
-
-    dev_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="رب العالمين", url="tg://user?id=8467593882", style=ButtonStyle.DANGER)]
+    message_id = callback.message.message_id
+    
+    raw_url = callback.data[4:]
+    decoded_url = raw_url.replace("%3A", ":").replace("%2F", "/").replace("%26", "&").replace("%3F", "?")
+    
+    dev_keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="رب العالمين", url="tg://user?id=8467593882", style="danger")]
     ])
     try:
         await callback.message.edit_reply_markup(reply_markup=dev_keyboard)
     except:
         pass
-
+        
     await callback.answer()
-
-    status_msg = await bot.send_message(
-        chat_id=chat_id,
-        text="0%",
-        reply_to_message_id=callback.message.message_id
-    )
-    asyncio.create_task(handle_reaction(status_msg, bot.id, is_bot=True))
-
-    last_notified_progress = [0]
-
-    def progress_hook(d):
+    
+    progress_msg = await bot.send_message(chat_id=chat_id, text="0%", reply_to_message_id=message_id)
+    last_reported_progress = [0]
+    
+    def gif_progress_hook(d):
         if d['status'] == 'downloading':
-            total = d.get('total_bytes') or d.get('total_bytes_estimate')
+            total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
             downloaded = d.get('downloaded_bytes', 0)
-            if total:
+            if total > 0:
                 percent = int((downloaded / total) * 100)
-                target_step = (percent // 25) * 25
-                if target_step > last_notified_progress[0] and target_step <= 100:
-                    last_notified_progress[0] = target_step
-                    asyncio.run_coroutine_threadsafe(
-                        status_msg.edit_text(f"{target_step}%"),
-                        asyncio.get_event_loop()
-                    )
+                step = (percent // 25) * 25
+                if step > last_reported_progress[0] and step <= 100:
+                    last_reported_progress[0] = step
+                    try:
+                        asyncio.run_coroutine_threadsafe(
+                            progress_msg.edit_text(f"{step}%"),
+                            asyncio.get_event_loop()
+                        )
+                    except:
+                        pass
 
     ydl_opts = {
-        'format': 'bestvideo',
-        'outtmpl': 'gif_temp_%(id)s.%(ext)s',
+        'format': 'bestvideo[height<=720]/best',
         'quiet': True,
         'no_warnings': True,
-        'progress_hooks': [progress_hook],
-        'referer': url,
-        'headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
+        'progress_hooks': [gif_progress_hook],
+        'http_headers': CUSTOM_HEADERS
     }
-
-    renamed_file = None
+    
     try:
-        loop = asyncio.get_running_loop()
-        
-        def run_gif_dl():
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                return ydl.extract_info(url, download=True)
-                
-        download_info = await loop.run_in_executor(None, run_gif_dl)
-        filename = f"gif_temp_{download_info.get('id')}.{download_info.get('ext')}"
-        
-        if not os.path.exists(filename):
-            for f in os.listdir('.'):
-                if f.startswith(f"gif_temp_{download_info.get('id')}"):
-                    filename = f
-                    break
-
-        if not os.path.exists(filename):
-            raise FileNotFoundError
-
-        mime_type, _ = mimetypes.guess_type(filename)
-        ext = mimetypes.guess_extension(mime_type) if mime_type else os.path.splitext(filename)[1]
-        if not ext:
-            ext = os.path.splitext(filename)[1]
-
-        renamed_file = f"gif_ready_{user_id}_{random.randint(1000, 9999)}{ext}"
-        os.rename(filename, renamed_file)
-
-        input_file = types.FSInputFile(renamed_file)
-
-        sent_note = await bot.send_video_note(
-            chat_id=chat_id,
-            video_note=input_file,
-            reply_to_message_id=callback.message.message_id,
-            has_spoiler=True
-        )
-        asyncio.create_task(handle_reaction(sent_note, bot.id, is_bot=True))
-
-        sent_confirm = await bot.send_message(
-            chat_id=chat_id,
-            text="نيكني بداعتي استاهل تنيكني هلكد اطيعك وصرت عاهرة بكل المعايير علمود اناج من عندك بليز",
-            reply_to_message_id=callback.message.message_id
-        )
-        asyncio.create_task(handle_reaction(sent_confirm, bot.id, is_bot=True))
-        
+        loop = asyncio.get_event_loop()
+        info = await loop.run_in_executor(None, lambda: yt_dlp.YoutubeDL(ydl_opts).extract_info(decoded_url, download=False))
+    except Exception:
         try:
-            await status_msg.delete()
+            await progress_msg.delete()
         except:
             pass
-
-    except Exception as e:
-        error_text = "الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي"
-        await status_msg.edit_text(error_text)
-
-    clear_system_cache([renamed_file])
-
-async def queue_worker(user_id, url, message):
-    if user_id not in user_semaphores:
-        user_semaphores[user_id] = asyncio.get_event_loop().is_running() and asyncio.Semaphore(2) or None
-        user_semaphores[user_id] = asyncio.Semaphore(2)
-        user_queue_counts[user_id] = 0
-
-    if user_queue_counts[user_id] >= 4:
+        fail_msg = await bot.send_message(chat_id=chat_id, text="الرابط غير مدعوم او الموقع مو مدعوم شم كسي ويصير مدعوم ههع امزح دادي", reply_to_message_id=message_id)
+        asyncio.create_task(set_random_reaction(chat_id, fail_msg.message_id))
         return
 
-    user_queue_counts[user_id] += 1
-    async with user_semaphores[user_id]:
-        user_queue_counts[user_id] -= 1
-        await execute_download_task(message, url, user_id)
+    uploader = info.get('uploader') or info.get('channel') or "Creator"
+    title = info.get('title') or "Video"
+    
+    uploader_clean = "".join([c for c in uploader if c.isalnum() or c in " -&_ "])
+    title_clean = "".join([c for c in title if c.isalnum() or c in " -&"])
+    
+    if has_arabic(uploader_clean):
+        uploader_clean = translate_and_format(uploader_clean, "en")
+    else:
+        uploader_clean = format_custom_case(uploader_clean)
+        
+    if has_arabic(title_clean):
+        title_clean = translate_and_format(title_clean, "en")
+    else:
+        title_clean = format_custom_case(title_clean)
+        
+    uploader_clean = uploader_clean.replace(" ", "_")
+    title_clean = " ".join([word for word in title_clean.split() if word != "_"])
+    
+    base_filename = f"{uploader_clean} - {title_clean}_gif.mp4"
+    file_path = f"downloads/{base_filename}"
+    
+    os.makedirs("downloads", exist_ok=True)
+    
+    temp_dl_opts = {
+        'format': 'bestvideo[height<=720]/best',
+        'outtmpl': file_path,
+        'quiet': True,
+        'no_warnings': True,
+        'progress_hooks': [gif_progress_hook],
+        'http_headers': CUSTOM_HEADERS
+    }
+    
+    try:
+        await loop.run_in_executor(None, lambda: yt_dlp.YoutubeDL(temp_dl_opts).download([decoded_url]))
+    except Exception:
+        try:
+            await progress_msg.delete()
+        except:
+            pass
+        fail_msg = await bot.send_message(chat_id=chat_id, text="الرابط غير مدعوم او الموقع مو مدعوم شم كسي ويصير مدعوم ههع امزح دادي", reply_to_message_id=message_id)
+        asyncio.create_task(set_random_reaction(chat_id, fail_msg.message_id))
+        return
+
+    try:
+        await progress_msg.delete()
+    except:
+        pass
+
+    if os.path.exists(file_path):
+        try:
+            file_input = types.FSInputFile(file_path)
+            
+            success_gif = await bot.send_animation(
+                chat_id=chat_id, 
+                animation=file_input, 
+                reply_to_message_id=message_id, 
+                has_spoiler=True
+            )
+            os.remove(file_path)
+            
+            success_msg = await bot.send_message(chat_id=chat_id, text="نيكني استاهل تشكني اطيعك مثل عديمة الكرامة", reply_to_message_id=success_gif.message_id)
+            asyncio.create_task(set_random_reaction(chat_id, success_msg.message_id))
+        except Exception:
+            fail_msg = await bot.send_message(chat_id=chat_id, text="الرابط غير مدعوم او الموقع مو مدعوم شم كسي ويصير مدعوم ههع امزح دادي", reply_to_message_id=message_id)
+            asyncio.create_task(set_random_reaction(chat_id, fail_msg.message_id))
+            if os.path.exists(file_path):
+                os.remove(file_path)
+    else:
+        fail_msg = await bot.send_message(chat_id=chat_id, text="الرابط غير مدعوم او الموقع مو مدعوم شم كسي ويصير مدعوم ههع امزح دادي", reply_to_message_id=message_id)
+        asyncio.create_task(set_random_reaction(chat_id, fail_msg.message_id))
+
+@dp.message(F.text == "بوت")
+async def handle_bot_keyword_in_group(message: types.Message):
+    is_group = message.chat.type in ["group", "supergroup", "channel"]
+    if is_group and message.chat.id in ACTIVE_GROUPS:
+        if await is_admin_or_owner(message):
+            asyncio.create_task(set_random_reaction(message.chat.id, message.message_id))
+            await send_next_food_emoji(message.chat.id, message.message_id)
 
 @dp.message(F.text)
-async def handle_all_messages(message: types.Message):
-    global response_counter, developer_counter
+async def handle_all_text_messages(message: types.Message):
+    is_group = message.chat.type in ["group", "supergroup", "channel"]
     
-    is_owner = False
-    if message.chat.type in {"group", "supergroup", "channel"}:
-        try:
-            member = await message.chat.get_member(message.from_user.id)
-            if member.status in {"creator", "administrator"}:
-                is_owner = True
-        except:
-            pass
-
-    asyncio.create_task(handle_reaction(
-        message, 
-        message.from_user.id, 
-        is_owner=is_owner, 
-        chat_type=message.chat.type
-    ))
-    
-    user_id = message.from_user.id
-    chat_type = message.chat.type
-    chat_id = message.chat.id
-    text = message.text or ""
-
-    is_group_or_channel = chat_type in {"group", "supergroup", "channel"}
-    
-    if is_group_or_channel and chat_id not in activated_chats:
+    if is_group:
+        if message.chat.id in ACTIVE_GROUPS:
+            if await is_admin_or_owner(message):
+                asyncio.create_task(set_random_reaction(message.chat.id, message.message_id))
         return
 
-    all_urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\ treasure),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
-    valid_url = None
-    for url in all_urls:
-        is_telegram_link = bool(re.search(r'(t\.me|telegram\.me|telegram\.org)', url, re.IGNORECASE))
-        is_youtube_link = bool(re.search(r'(youtube\.com|youtu\.be)', url, re.IGNORECASE))
-        if not is_telegram_link and not is_youtube_link:
-            valid_url = url
-            break
+    asyncio.create_task(set_random_reaction(message.chat.id, message.message_id))
 
-    if valid_url:
-        asyncio.create_task(queue_worker(user_id, valid_url, message))
-        return
+    global current_response_index, current_dev_button_toggle
+    response_text = RANDOM_RESPONSES[current_response_index % len(RANDOM_RESPONSES)]
+    current_response_index += 1
 
-    if is_group_or_channel:
-        return
-
-    if user_modes.get(user_id, False):
-        target_lang = user_langs.get(user_id, "ru")
-        processed_text = clean_and_format_text(text, target_lang)
-        await send_animated_text(message.chat.id, processed_text, message.message_id)
-        return
-
-    selected_text = BOT_ROTATING_RESPONSES[response_counter % len(BOT_ROTATING_RESPONSES)]
-    response_counter += 1
-
-    if developer_counter % 2 == 0:
-        dev_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="المطور", url="tg://user?id=8467593882", style=ButtonStyle.DANGER)]
+    if current_dev_button_toggle:
+        keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(text="المطور", url="tg://user?id=8467593882", style="danger")]
         ])
     else:
-        dev_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="تواصل مع المطور", url="tg://user?id=8597653867", style=ButtonStyle.PRIMARY)]
+        keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(text="تواصل مع المطور", url="tg://user?id=8597653867", style="primary")]
         ])
-    developer_counter += 1
+    
+    current_dev_button_toggle = not current_dev_button_toggle
 
     await send_animated_text(
-        chat_id=message.chat.id,
-        text=selected_text,
-        reply_to_message_id=message.message_id,
-        reply_markup=dev_keyboard
+        message.chat.id,
+        response_text,
+        reply_to_id=message.message_id,
+        send_food=True,
+        reply_markup=keyboard
     )
 
-async def notify_developers_on_startup():
-    await asyncio.sleep(2)
-    dev_ids = [DEV_ID_1, DEV_ID_2]
+async def main():
     startup_text = "اشتغل البوت مرتلخ تاج راسي\nارضع عيرك ؟!"
-    
-    god_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="رب العالمين", url="tg://user?id=8467593882", style=ButtonStyle.DANGER)]
+    dev_kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="رب العالمين", url="tg://user?id=8467593882", style="danger")]
     ])
-
-    for dev_id in dev_ids:
+    
+    for dev_id in DEVELOPER_IDS:
         try:
-            sent_msg = await send_animated_text(
-                chat_id=dev_id,
-                text=startup_text,
-                reply_markup=god_keyboard
+            await send_animated_text(
+                chat_id=dev_id, 
+                text=startup_text, 
+                send_food=True, 
+                reply_markup=dev_kb
             )
-            asyncio.create_task(handle_reaction(sent_msg, dev_id, is_bot=True))
         except:
             pass
-
-async def main():
-    asyncio.create_task(notify_developers_on_startup())
+            
     await dp.start_polling(bot)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(main())
