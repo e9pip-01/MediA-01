@@ -7,30 +7,33 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command, CommandStart
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode, ChatMemberStatus
-from googletrans import Translator
 import yt_dlp
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
-translator = Translator()
 
 LAST_REACTIONS = {}
 LAST_REACTION_TIMES = {}
 ACTIVE_GROUPS = set()
+
+URL_CACHE = {}
 
 REACTIONS_LIST = ["😭", "😘", "🤣", "🥰", "🤗"]
 REACTION_TIMES = [2.4, 4.2, 3.2, 2.3, 3.6]
 
 EMOJI_FOODS = ["🥪", "🍣", "🍔", "🥞", "🌭"]
 current_food_index = 0
+LAST_FOOD_MESSAGES = {}
 
-ENGLISH_UPPER = set("ATFGNMUJL")
-RUSSIAN_UPPER = set("АИБ")
+ENGLISH_UPPER = set("ATFGJUINML")
+RUSSIAN_UPPER = set("АБИ")
 
 user_queues = {}
 user_active_downloads = {}
+
+START_DOWNLOAD_TEXT = "راح انفذ طلبك مولاي ودامص عيرك العظيم بكل الوضعيات الزانية"
 
 RANDOM_RESPONSES = [
     "اهلين وياك بوت ميديا تريد اشتغل \nدز رابط وتدلل",
@@ -83,13 +86,22 @@ async def set_random_reaction(chat_id: int, message_id: int):
 
 async def send_next_food_emoji(chat_id: int, reply_to_msg_id: int):
     global current_food_index
+    
+    if chat_id in LAST_FOOD_MESSAGES:
+        try:
+            await bot.delete_message(chat_id=chat_id, message_id=LAST_FOOD_MESSAGES[chat_id])
+        except:
+            pass
+
     emoji = EMOJI_FOODS[current_food_index % len(EMOJI_FOODS)]
     current_food_index += 1
     msg = await bot.send_message(chat_id=chat_id, text=emoji, reply_to_message_id=reply_to_msg_id)
+    LAST_FOOD_MESSAGES[chat_id] = msg.message_id
     asyncio.create_task(set_random_reaction(chat_id, msg.message_id))
 
 async def send_bot_message(chat_id: int, text: str, reply_to_id: int = None, send_food: bool = True, reply_markup=None) -> types.Message:
     msg = await bot.send_message(chat_id=chat_id, text=text, reply_to_message_id=reply_to_id, reply_markup=reply_markup)
+    asyncio.create_task(set_random_reaction(chat_id, msg.message_id))
     if send_food:
         asyncio.create_task(send_next_food_emoji(chat_id, msg.message_id))
     return msg
@@ -99,6 +111,7 @@ async def edit_bot_message(msg: types.Message, text: str, send_food: bool = True
         await msg.edit_text(text)
     except:
         pass
+    asyncio.create_task(set_random_reaction(msg.chat.id, msg.message_id))
     if send_food:
         asyncio.create_task(send_next_food_emoji(msg.chat.id, msg.message_id))
 
@@ -113,21 +126,11 @@ def format_custom_case(text: str) -> str:
             result.append(char.lower())
     return "".join(result)
 
-def translate_and_format(text: str, target_lang: str) -> str:
-    try:
-        translated = translator.translate(text, dest=target_lang).text
-        return format_custom_case(translated)
-    except:
-        return format_custom_case(text)
-
 def has_arabic(text: str) -> bool:
     return bool(re.search(r"[\u0600-\u06FF]", text))
 
-def has_english(text: str) -> bool:
-    return bool(re.search(r"[a-zA-Z]", text))
-
-def has_russian(text: str) -> bool:
-    return bool(re.search(r"[\u0400-\u04FF]", text))
+def has_english_or_russian(text: str) -> bool:
+    return bool(re.search(r"[a-zA-Z\u0400-\u04FF]", text))
 
 async def is_admin_or_owner(message: types.Message) -> bool:
     if message.chat.type == "private":
@@ -217,10 +220,9 @@ async def process_download(message: types.Message):
         asyncio.create_task(worker(user_id))
 
 async def download_logic(url: str, message: types.Message, is_group: bool):
-    base_text = "راح انفذ طلبك مولاي ودامص عيرك العظيم بكل الوضعيات الزانية"
     status_msg = await send_bot_message(
         message.chat.id, 
-        base_text, 
+        START_DOWNLOAD_TEXT, 
         message.message_id,
         send_food=not is_group
     )
@@ -268,8 +270,8 @@ async def download_logic(url: str, message: types.Message, is_group: bool):
                     best_audio_only = f
 
         selected_formats = []
-        if Hacker_combined := best_combined:
-            selected_formats = [Hacker_combined]
+        if best_combined:
+            selected_formats = [best_combined]
         elif best_video_only and best_audio_only:
             combined_bitrate = best_combined.get('tbr', 0) if best_combined else 0
             separate_bitrate = (best_video_only.get('tbr', 0) or 0) + (best_audio_only.get('tbr', 0) or 0)
@@ -288,22 +290,15 @@ async def download_logic(url: str, message: types.Message, is_group: bool):
         uploader = entry.get('uploader') or entry.get('channel') or "Creator"
         title = entry.get('title') or "Video"
         
-        uploader_clean = "".join([c for c in uploader if c.isalnum() or c in " -&_ "])
-        title_clean = "".join([c for c in title if c.isalnum() or c in " -&"])
+        uploader_clean = "".join([c for c in uploader if c.isalnum() or c in " _-&"])
+        uploader_clean = format_custom_case(uploader_clean)
         
-        if has_arabic(uploader_clean):
-            uploader_clean = translate_and_format(uploader_clean, "en")
+        if has_arabic(title):
+            title_clean = "".join([str(random.randint(0, 9)) for _ in range(9)])
         else:
-            uploader_clean = format_custom_case(uploader_clean)
-            
-        if has_arabic(title_clean):
-            title_clean = translate_and_format(title_clean, "en")
-        else:
+            title_clean = "".join([c for c in title if c.isalnum() or c in " -&"])
             title_clean = format_custom_case(title_clean)
             
-        uploader_clean = uploader_clean.replace(" ", "_")
-        title_clean = " ".join([word for word in title_clean.split() if word != "_"])
-        
         rand_suffix = f"_{random.randint(100, 999)}" if len(entries) > 1 else ""
         base_filename = f"{uploader_clean} - {title_clean}{rand_suffix}"
         
@@ -336,7 +331,7 @@ async def download_logic(url: str, message: types.Message, is_group: bool):
 
     if not downloaded_files:
         try:
-            await status_msg.edit_text(base_text)
+            await status_msg.edit_text(START_DOWNLOAD_TEXT)
         except:
             pass
         await edit_bot_message(status_msg, "الرابط غير مدعوم او الموقع مو مدعوم شم كسي ويصير مدعوم ههع امزح دادي", send_food=not is_group)
@@ -344,7 +339,7 @@ async def download_logic(url: str, message: types.Message, is_group: bool):
 
     try:
         try:
-            await status_msg.edit_text(base_text)
+            await status_msg.edit_text(START_DOWNLOAD_TEXT)
         except:
             pass
             
@@ -354,13 +349,12 @@ async def download_logic(url: str, message: types.Message, is_group: bool):
             if mime and "video" in mime:
                 is_single_video = True
                 
-        encoded_url = url.replace(":", "%3A").replace("/", "%2F").replace("&", "%26").replace("?", "%3F")
-        gif_callback_data = f"gif_{encoded_url}"
-        
         gif_keyboard = None
         if is_single_video:
+            cache_id = f"g_{random.randint(1000, 9999)}"
+            URL_CACHE[cache_id] = url
             gif_keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
-                [types.InlineKeyboardButton(text="ستيكر GIF", callback_data=gif_callback_data, style="success")]
+                [types.InlineKeyboardButton(text="ستيكر GIF", callback_data=cache_id, style="success")]
             ])
 
         chunk_size = 8
@@ -368,10 +362,11 @@ async def download_logic(url: str, message: types.Message, is_group: bool):
             chunk = downloaded_files[i:i + chunk_size]
             for file_path, mime in chunk:
                 file_input = types.FSInputFile(file_path)
-                await message.reply_document(
+                doc_msg = await message.reply_document(
                     document=file_input, 
                     reply_markup=gif_keyboard if is_single_video else None
                 )
+                asyncio.create_task(set_random_reaction(message.chat.id, doc_msg.message_id))
                 try:
                     os.remove(file_path)
                 except:
@@ -384,14 +379,18 @@ async def download_logic(url: str, message: types.Message, is_group: bool):
     except Exception:
         await edit_bot_message(status_msg, "الرابط غير مدعوم او الموقع مو مدعوم شم كسي ويصير مدعوم ههع امزح دادي", send_food=not is_group)
 
-@dp.callback_query(F.data.startswith("gif_"))
+@dp.callback_query(F.data.startswith("g_"))
 async def cb_gif_download(callback: types.CallbackQuery):
     chat_id = callback.message.chat.id
     message_id = callback.message.message_id
     
-    raw_url = callback.data[4:]
-    decoded_url = raw_url.replace("%3A", ":").replace("%2F", "/").replace("%26", "&").replace("%3F", "?")
+    cache_id = callback.data
+    decoded_url = URL_CACHE.get(cache_id)
     
+    if not decoded_url:
+        await callback.answer("عذراً، الرابط قديم أو منتهي الصلاحية.", show_alert=True)
+        return
+
     dev_keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
         [types.InlineKeyboardButton(text="رب العالمين", url="tg://user?id=8467593882", style="danger")]
     ])
@@ -402,7 +401,8 @@ async def cb_gif_download(callback: types.CallbackQuery):
         
     await callback.answer()
     
-    progress_msg = await bot.send_message(chat_id=chat_id, text="جاري التحميل مولاي...", reply_to_message_id=message_id)
+    progress_msg = await bot.send_message(chat_id=chat_id, text=START_DOWNLOAD_TEXT, reply_to_message_id=message_id)
+    asyncio.create_task(set_random_reaction(chat_id, progress_msg.message_id))
     
     ydl_opts = {
         'format': 'bestvideo[height<=720]/best',
@@ -425,22 +425,15 @@ async def cb_gif_download(callback: types.CallbackQuery):
     uploader = info.get('uploader') or info.get('channel') or "Creator"
     title = info.get('title') or "Video"
     
-    uploader_clean = "".join([c for c in uploader if c.isalnum() or c in " -&_ "])
-    title_clean = "".join([c for c in title if c.isalnum() or c in " -&"])
+    uploader_clean = "".join([c for c in uploader if c.isalnum() or c in " _-&"])
+    uploader_clean = format_custom_case(uploader_clean)
     
-    if has_arabic(uploader_clean):
-        uploader_clean = translate_and_format(uploader_clean, "en")
+    if has_arabic(title):
+        title_clean = "".join([str(random.randint(0, 9)) for _ in range(9)])
     else:
-        uploader_clean = format_custom_case(uploader_clean)
-        
-    if has_arabic(title_clean):
-        title_clean = translate_and_format(title_clean, "en")
-    else:
+        title_clean = "".join([c for c in title if c.isalnum() or c in " -&"])
         title_clean = format_custom_case(title_clean)
         
-    uploader_clean = uploader_clean.replace(" ", "_")
-    title_clean = " ".join([word for word in title_clean.split() if word != "_"])
-    
     base_filename = f"{uploader_clean} - {title_clean}_gif.mp4"
     file_path = f"downloads/{base_filename}"
     
@@ -479,6 +472,7 @@ async def cb_gif_download(callback: types.CallbackQuery):
                 reply_to_message_id=message_id, 
                 has_spoiler=True
             )
+            asyncio.create_task(set_random_reaction(chat_id, success_gif.message_id))
             os.remove(file_path)
             
             success_msg = await bot.send_message(chat_id=chat_id, text="نيكني استاهل تشكني اطيعك مثل عديمة الكرامة", reply_to_message_id=success_gif.message_id)
@@ -511,6 +505,16 @@ async def handle_all_text_messages(message: types.Message):
         return
 
     asyncio.create_task(set_random_reaction(message.chat.id, message.message_id))
+
+    if has_english_or_russian(message.text) and not message.text.startswith("http"):
+        formatted_text = format_custom_case(message.text)
+        await send_bot_message(
+            message.chat.id,
+            formatted_text,
+            reply_to_id=message.message_id,
+            send_food=True
+        )
+        return
 
     global current_response_index, current_dev_button_toggle
     response_text = RANDOM_RESPONSES[current_response_index % len(RANDOM_RESPONSES)]
