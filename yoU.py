@@ -397,7 +397,7 @@ async def process_set_lang(callback: types.CallbackQuery):
     chosen_lang = "eNG" if callback.data == "set_eng" else "rUS"
     user_langs[user_id] = "en" if callback.data == "set_eng" else "ru"
     
-    target_msg = f"تم تغيير لغة وضع اللغات مولاي\nصارت\n{chosen_lang}"
+    target_msg = f"تم تغيير لغة وضع اللغات مولاي\nصارت {chosen_lang}"
     
     await edit_animated_text(callback.message, target_msg)
     await asyncio.sleep(1)
@@ -442,7 +442,12 @@ async def execute_download_task(message: types.Message, url: str, user_id: int):
         'format': 'best',
         'outtmpl': '%(id)s.%(ext)s',
         'quiet': True,
-        'no_warnings': True
+        'no_warnings': True,
+        'referer': url,
+        'headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': '*/*'
+        }
     }
 
     downloaded_paths = []
@@ -614,7 +619,11 @@ async def process_download_gif(callback: types.CallbackQuery):
         'outtmpl': 'gif_temp_%(id)s.%(ext)s',
         'quiet': True,
         'no_warnings': True,
-        'progress_hooks': [progress_hook]
+        'progress_hooks': [progress_hook],
+        'referer': url,
+        'headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
     }
 
     renamed_file = None
