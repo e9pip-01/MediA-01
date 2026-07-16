@@ -49,7 +49,7 @@ async def send_bot_message(chat_id: int, text: str, reply_to_id: int = None, sen
     return msg
 
 def format_custom_case(text: str) -> str:
-    return "".join(c.upper() if c.upper() in set("ATFGJUINMLАБИ") else c.lower() for c in text)
+    return "".join(c.upper() if c.upper() in set("ATFGJUNMLАБИ") else c.lower() for c in text)
 
 async def is_admin_or_owner(message: types.Message) -> bool:
     if message.chat.type == "private": return True
