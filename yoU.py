@@ -14,7 +14,7 @@ user_queues, user_active_downloads = {}, {}
 current_food_index, current_response_index = 0, 0
 current_dev_button_toggle = True
 
-REACTIONS = ["😭", "😘", "🤣", "🥰", "🤗"]
+REACTIONS = ["🤣", "😡", "😭", "🍓", "🥰", "🫡", "😘"]
 FOODS = ["🥪", "🍣", "🍔", "🥞", "🌭"]
 DEVELOPER_IDS = [8467593882, 8597653867]
 
