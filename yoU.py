@@ -2,7 +2,7 @@ import os, re, random, asyncio, yt_dlp
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart
 from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode, ChatMemberStatus
+from aiogram.enums import ParseMode, ChatMemberStatus, ContentType
 from aiogram.utils.media_group import MediaGroupBuilder
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -27,6 +27,14 @@ RANDOM_RESPONSES = [
     "من اشوف زبك يسعبل كسي وتذوب الروح انزل\nالعيرك ذليلة امصة ولباسي مشلوح",
     "انزع لباسي الك وتنيكني يبعد كل طموح شكني\nبعيرك وضرطني العافيه ترى فدوة الك اروح"
 ]
+
+SERVICE_MESSAGES = F.content_type.in_({
+    ContentType.NEW_CHAT_PHOTO, ContentType.DELETE_CHAT_PHOTO, ContentType.NEW_CHAT_TITLE,
+    ContentType.NEW_CHAT_MEMBERS, ContentType.LEFT_CHAT_MEMBER, ContentType.PINNED_MESSAGE,
+    ContentType.VIDEO_CHAT_STARTED, ContentType.VIDEO_CHAT_ENDED, ContentType.VIDEO_CHAT_PARTICIPANTS_INVITED,
+    ContentType.FORUM_TOPIC_CREATED, ContentType.FORUM_TOPIC_CLOSED, ContentType.FORUM_TOPIC_REOPENED,
+    ContentType.MESSAGE_AUTO_DELETE_TIMER_CHANGED
+})
 
 async def set_random_reaction(chat_id: int, msg_id: int):
     await asyncio.sleep(random.choice([2.3, 2.4, 3.2, 3.6, 4.2]))
@@ -57,6 +65,13 @@ async def is_admin_or_owner(chat_id: int, user_id: int) -> bool:
         return m.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR]
     except: return False
 
+@dp.message(SERVICE_MESSAGES)
+@dp.channel_post(SERVICE_MESSAGES)
+async def delete_all_service_messages(message: types.Message):
+    if message.chat.id in MUTED_CHATS:
+        try: await message.delete()
+        except: pass
+
 @dp.message(F.chat.type.in_({"group", "supergroup", "channel"}), F.text.in_({"قفل الاشعارات", "فتح الاشعارات"}))
 @dp.channel_post(F.text.in_({"قفل الاشعارات", "فتح الاشعارات"}))
 async def toggle_service_notifications(message: types.Message):
@@ -67,13 +82,6 @@ async def toggle_service_notifications(message: types.Message):
     else:
         MUTED_CHATS.discard(message.chat.id)
         await send_bot_message(message.chat.id, "¹# - تم فتح الاشعارات مولاي\nكل الاشعارات", message.message_id, False)
-
-@dp.message(F.service)
-@dp.channel_post(F.service)
-async def delete_service_messages(message: types.Message):
-    if message.chat.id in MUTED_CHATS:
-        try: await message.delete()
-        except: pass
 
 @dp.message(F.chat.type.in_({"group", "supergroup"}), F.text.in_({"تفعيل", "تعطيل"}))
 async def cmd_toggle_group(message: types.Message):
