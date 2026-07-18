@@ -100,9 +100,10 @@ async def toggle_service_notifications(message: types.Message) -> None:
         MUTED_CHATS.discard(message.chat.id)
         await send_bot_message(message.chat.id, "¹# - تم فتح الاشعارات مولاي\nكل الاشعارات", message.message_id, False)
 
-@dp.message(F.chat.type.in_({"group", "supergroup"}), F.text.in_({"تفعيل", "تعطيل"}))
+@dp.message(F.chat.type.in_({"group", "supergroup", "channel"}), F.text.in_({"تفعيل", "تعطيل"}))
+@dp.channel_post(F.text.in_({"تفعيل", "تعطيل"}))
 async def cmd_toggle_group(message: types.Message) -> None:
-    if await is_admin_or_owner(message.chat.id, message.from_user.id):
+    if message.chat.type == "channel" or (message.from_user and await is_admin_or_owner(message.chat.id, message.from_user.id)):
         if message.text == "تفعيل":
             ACTIVE_GROUPS.add(message.chat.id)
         else:
@@ -253,12 +254,26 @@ async def download_logic(url: str, message: types.Message, is_group: bool) -> No
 @dp.message(F.text == "بوت")
 @dp.channel_post(F.text == "بوت")
 async def handle_bot_keyword(message: types.Message) -> None:
-    if message.chat.type in {"group", "supergroup"}:
-        if message.chat.id not in ACTIVE_GROUPS or not await is_admin_or_owner(message.chat.id, message.from_user.id):
+    if message.chat.type in {"group", "supergroup", "channel"}:
+        if message.chat.id not in ACTIVE_GROUPS:
             return
-            
+        if message.chat.type != "channel" and message.from_user and not await is_admin_or_owner(message.chat.id, message.from_user.id):
+            return
+
+    global current_response_index, current_dev_button_toggle
     asyncio.create_task(set_random_reaction(message.chat.id, message.message_id))
-    await send_next_food_emoji(message.chat.id, message.message_id)
+    
+    resp = RANDOM_RESPONSES[current_response_index % len(RANDOM_RESPONSES)]
+    current_response_index += 1
+    
+    dev_btn = (
+        [types.InlineKeyboardButton(text="المطور", url="tg://user?id=8467593882", style="danger")]
+        if current_dev_button_toggle else
+        [types.InlineKeyboardButton(text="تواصل مع المطور", url="tg://user?id=8597653867", style="primary")]
+    )
+    current_dev_button_toggle = not current_dev_button_toggle
+    
+    await send_bot_message(message.chat.id, resp, message.message_id, True, types.InlineKeyboardMarkup(inline_keyboard=[dev_btn]))
 
 @dp.message(F.text)
 async def handle_all_text_messages(message: types.Message) -> None:
