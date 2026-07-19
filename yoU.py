@@ -5,7 +5,6 @@ import asyncio
 from contextlib import suppress
 import yt_dlp
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import CommandStart
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode, ChatMemberStatus, ContentType
 from aiogram.utils.media_group import MediaGroupBuilder
@@ -90,7 +89,7 @@ async def delete_all_service_messages(message: types.Message) -> None:
 @dp.message(F.chat.type.in_({"group", "supergroup", "channel"}), F.text.in_({"قفل الاشعارات", "فتح الاشعارات"}))
 @dp.channel_post(F.text.in_({"قفل الاشعارات", "فتح الاشعارات"}))
 async def toggle_service_notifications(message: types.Message) -> None:
-    if message.from_user and not await is_admin_or_owner(message.chat.id, message.from_user.id):
+    if message.chat.type != "channel" and message.from_user and not await is_admin_or_owner(message.chat.id, message.from_user.id):
         return
     
     if message.text == "قفل الاشعارات":
@@ -109,11 +108,6 @@ async def cmd_toggle_group(message: types.Message) -> None:
         else:
             ACTIVE_GROUPS.discard(message.chat.id)
         await send_bot_message(message.chat.id, f"تم {message.text} البوت مولاي\nارسل رابط الان", message.message_id, False)
-
-@dp.message(CommandStart())
-async def cmd_start(message: types.Message) -> None:
-    if message.chat.type == "private":
-        await handle_all_text_messages(message)
 
 async def worker(user_id: int) -> None:
     queue = user_queues.get(user_id)
@@ -137,11 +131,18 @@ async def worker(user_id: int) -> None:
 async def process_download(message: types.Message) -> None:
     url = message.text
     if any(x in url for x in ["youtube.com", "youtu.be", "t.me", "telegram.dog"]):
-        await handle_all_text_messages(message)
+        if message.chat.type == "private":
+            global current_response_index, current_dev_button_toggle
+            asyncio.create_task(set_random_reaction(message.chat.id, message.message_id))
+            resp = RANDOM_RESPONSES[current_response_index % len(RANDOM_RESPONSES)]
+            current_response_index += 1
+            dev_btn = ([types.InlineKeyboardButton(text="المطور", url="tg://user?id=8467593882", style="danger")] if current_dev_button_toggle else [types.InlineKeyboardButton(text="تواصل مع المطور", url="tg://user?id=8597653867", style="primary")])
+            current_dev_button_toggle = not current_dev_button_toggle
+            await send_bot_message(message.chat.id, resp, message.message_id, True, types.InlineKeyboardMarkup(inline_keyboard=[dev_btn]))
         return
         
-    is_group = message.chat.type in {"group", "supergroup"}
-    if is_group and (message.chat.id not in ACTIVE_GROUPS or not await is_admin_or_owner(message.chat.id, message.from_user.id)):
+    is_group = message.chat.type in {"group", "supergroup", "channel"}
+    if is_group and message.chat.id not in ACTIVE_GROUPS:
         return
 
     if url in URL_CACHE:
@@ -164,7 +165,7 @@ async def process_download(message: types.Message) -> None:
         return
 
     asyncio.create_task(set_random_reaction(message.chat.id, message.message_id))
-    user_id = message.from_user.id
+    user_id = message.from_user.id if message.from_user else message.chat.id
     
     if user_id not in user_queues:
         user_queues[user_id] = asyncio.Queue()
@@ -275,16 +276,11 @@ async def handle_bot_keyword(message: types.Message) -> None:
     
     await send_bot_message(message.chat.id, resp, message.message_id, True, types.InlineKeyboardMarkup(inline_keyboard=[dev_btn]))
 
-@dp.message(F.text)
-async def handle_all_text_messages(message: types.Message) -> None:
-    if message.chat.type in {"group", "supergroup"}:
-        if message.chat.id in ACTIVE_GROUPS and await is_admin_or_owner(message.chat.id, message.from_user.id):
-            asyncio.create_task(set_random_reaction(message.chat.id, message.message_id))
-        return
-
+@dp.message(F.text, F.chat.type == "private")
+async def handle_private_text_messages(message: types.Message) -> None:
     asyncio.create_task(set_random_reaction(message.chat.id, message.message_id))
     
-    if bool(re.search(r"[a-zA-Z\u0400-\u04FF]", message.text)) and not message.text.startswith("http"):
+    if bool(re.search(r"[a-zA-Z\u0400-\u04FF/]", message.text)):
         await send_bot_message(message.chat.id, format_custom_case(message.text), message.message_id, True)
         return
 
@@ -300,6 +296,12 @@ async def handle_all_text_messages(message: types.Message) -> None:
     current_dev_button_toggle = not current_dev_button_toggle
     
     await send_bot_message(message.chat.id, resp, message.message_id, True, types.InlineKeyboardMarkup(inline_keyboard=[dev_btn]))
+
+@dp.message(F.text)
+async def handle_group_text_messages(message: types.Message) -> None:
+    if message.chat.type in {"group", "supergroup"}:
+        if message.chat.id in ACTIVE_GROUPS and message.from_user and await is_admin_or_owner(message.chat.id, message.from_user.id):
+            asyncio.create_task(set_random_reaction(message.chat.id, message.message_id))
 
 async def main() -> None:
     dev_kb = types.InlineKeyboardMarkup(inline_keyboard=[[types.InlineKeyboardButton(text="رب العالمين", url="tg://user?id=8467593882", style="danger")]])
