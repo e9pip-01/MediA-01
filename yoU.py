@@ -177,14 +177,20 @@ async def download_logic(url: str, message: types.Message) -> None:
 @dp.message(F.text, F.chat.type == "private")
 async def handle_private_text_messages(message: types.Message) -> None:
     asyncio.create_task(set_random_reaction(message.chat.id, message.message_id))
-    if bool(re.search(r"[a-zA-Z\u0400-\u04FF/]", message.text)):
+    
+    clean_text = message.text.strip()
+    
+    if not clean_text.startswith("/") and bool(re.match(r"^[a-zA-Z\u0400-\u04FF0-9\s.,!?-]+$", clean_text)):
         await send_bot_message(message.chat.id, format_custom_case(message.text), message.message_id, True)
         return
+        
     global current_response_index, current_dev_button_toggle
     resp = RANDOM_RESPONSES[current_response_index % len(RANDOM_RESPONSES)]
     current_response_index += 1
+    
     dev_btn = ([types.InlineKeyboardButton(text="المطور", url="tg://user?id=8800673233", style="danger")] if current_dev_button_toggle else [types.InlineKeyboardButton(text="تواصل مع المطور", url="tg://user?id=8800673233", style="primary")])
     current_dev_button_toggle = not current_dev_button_toggle
+    
     await send_bot_message(message.chat.id, resp, message.message_id, True, types.InlineKeyboardMarkup(inline_keyboard=[dev_btn]))
 
 async def main() -> None:
