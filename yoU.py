@@ -51,6 +51,20 @@ msg_counter: Dict[int, int] = {}
 UPPER_ENG = set("ATFGNMUJL")
 UPPER_RUS = set("АИБ")
 
+ORDERED_REPLIES = [
+    "اهلين وياك بوت ميديا تريد اشتغل \nدز رابط وتدلل",
+    "مو ناوي تدلعني مثل البوتات\nترى ازعل منك اصيح المولاي يغصص بلاعيمك",
+    "راح اكلك شعر يهبل كتبته بماي كسي\nراح اونسك بس اسمع",
+    "من اشوف زبك يسعبل كسي وتذوب الروح انزل\nالعيرك ذليلة امصة ولباسي مشلوح",
+    "انزع لباسي الك وتنيكني يبعد كل طموح شكني\nبعيرك وضرطني العافيه ترى فدوة الك اروح"
+]
+
+def get_next_ordered_reply(user_id: int) -> str:
+    current_index = msg_counter.get(user_id, 0)
+    selected_text = ORDERED_REPLIES[current_index]
+    msg_counter[user_id] = (current_index + 1) % len(ORDERED_REPLIES)
+    return selected_text
+
 def transform_english(text: str) -> str:
     res = []
     for char in text:
@@ -133,69 +147,21 @@ async def handle_reaction(message: Message, chat_type: ChatType, is_owner: bool,
         pass
 
 async def send_typing_animated(chat_id: int, text: str, reply_to_id: int) -> Message:
-    lines = text.split('\n')
-    words_per_line = [line.split() for line in lines]
-    max_words = max(len(w) for w in words_per_line) if words_per_line else 0
-
-    steps = []
-    pattern = [3, 2, 3]
-    pat_idx = 0
-    curr_w = 0
-
-    while curr_w < max_words:
-        step_inc = pattern[pat_idx % len(pattern)]
-        curr_w += step_inc
-        pat_idx += 1
-        
-        step_lines = []
-        for line_words in words_per_line:
-            taken = line_words[:min(curr_w, len(line_words))]
-            step_lines.append(" ".join(taken))
-        steps.append("\n".join(step_lines))
-
-    if not steps:
-        steps = [text]
-
     sent_msg = await bot.send_message(
         chat_id=chat_id,
-        text=steps[0],
-        reply_to_message_id=reply_to_id
+        text=text,
+        reply_to_message_id=reply_to_id if reply_to_id > 0 else None
     )
 
-    emoji_sent = False
-    for i in range(1, len(steps)):
-        await asyncio.sleep(0.3)
-        try:
-            await bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=sent_msg.message_id,
-                text=steps[i]
-            )
-        except Exception:
-            pass
-        
-        if i == 1 and not emoji_sent:
-            emoji_sent = True
-            chosen_e = random.choice(EMOJIS_LIST)
-            try:
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text=chosen_e,
-                    reply_to_message_id=sent_msg.message_id
-                )
-            except Exception:
-                pass
-
-    if len(steps) <= 1 and not emoji_sent:
-        chosen_e = random.choice(EMOJIS_LIST)
-        try:
-            await bot.send_message(
-                chat_id=chat_id,
-                text=chosen_e,
-                reply_to_message_id=sent_msg.message_id
-            )
-        except Exception:
-            pass
+    chosen_e = random.choice(EMOJIS_LIST)
+    try:
+        await bot.send_message(
+            chat_id=chat_id,
+            text=chosen_e,
+            reply_to_message_id=sent_msg.message_id
+        )
+    except Exception:
+        pass
 
     return sent_msg
 
@@ -284,7 +250,7 @@ async def cb_toggle_lang_mode(callback: CallbackQuery):
         is_active = True
         alert_text = "تم تفعيل وضع اللغات\nالوضع ✅"
         
-    await callback.answer(alert_text, show_alert=False)
+    await callback.answer(alert_text, show_alert=True)
     kb = build_edit_keyboard(is_active)
     try:
         await callback.message.edit_reply_markup(reply_markup=kb)
@@ -363,7 +329,7 @@ async def process_download_job(message: Message, url: str):
     
     status_msg = await send_typing_animated(
         chat_id,
-        "راح انفذ طلبك مولاي ودامص عيرك\nالعظيم بكل الوضعيات الزانية",
+        "دانفذ طلبك انتظر مولاي ماراح اضل هواي\nراح امص عيرك ءعهقءعهقءعهق",
         message.message_id
     )
 
@@ -479,14 +445,7 @@ async def general_message_handler(message: Message):
     asyncio.create_task(handle_reaction(message, chat_type, is_owner, False))
 
     if text == "بوت" and chat_type != ChatType.PRIVATE:
-        reply_texts = [
-            "اهلين وياك بوت ميديا تريد اشتغل \nدز رابط وتدلل",
-            "مو ناوي تدلعني مثل البوتات\nترى ازعل منك اصيح المولاي يغصص بلاعيمك",
-            "راح اكلك شعر يهبل كتبته بماي كسي\nراح اونسك بس اسمع",
-            "من اشوف زبك يسعبل كسي وتذوب الروح انزل\nالعيرك ذليلة امصة ولباسي مشلوح",
-            "انزع لباسي الك وتنيكني يبعد كل طموح شكني\nبعيرك وضرطني العافيه ترى فدوة الك اروح"
-        ]
-        chosen_text = random.choice(reply_texts)
+        chosen_text = get_next_ordered_reply(user_id)
         sent = await send_typing_animated(chat_id, chosen_text, message.message_id)
         asyncio.create_task(handle_reaction(sent, chat_type, is_owner, True))
         return
@@ -550,14 +509,7 @@ async def general_message_handler(message: Message):
         return
 
     if chat_type == ChatType.PRIVATE:
-        reply_texts = [
-            "اهلين وياك بوت ميديا تريد اشتغل \nدز رابط وتدلل",
-            "مو ناوي تدلعني مثل البوتات\nترى ازعل منك اصيح المولاي يغصص بلاعيمك",
-            "راح اكلك شعر يهبل كتبته بماي كسي\nراح اونسك بس اسمع",
-            "من اشوف زبك يسعبل كسي وتذوب الروح انزل\nالعيرك ذليلة امصة ولباسي مشلوح",
-            "انزع لباسي الك وتنيكني يبعد كل طموح شكني\nبعيرك وضرطني العافيه ترى فدوة الك اروح"
-        ]
-        chosen_text = random.choice(reply_texts)
+        chosen_text = get_next_ordered_reply(user_id)
         sent = await send_typing_animated(chat_id, chosen_text, message.message_id)
 
         toggle = dev_buttons_toggle.get(user_id, False)
