@@ -349,7 +349,7 @@ async def cb_open_switch_lang(callback: CallbackQuery):
     btn_back = InlineKeyboardButton(text="عودة", callback_data="back_to_edit", style="secondary")
     
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [btn_rus, btn_eng],
+        [btn_eng, btn_rus],
         [btn_back]
     ])
     try:
