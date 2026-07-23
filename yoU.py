@@ -343,6 +343,8 @@ async def cb_toggle_lang_mode(callback: CallbackQuery):
 
 @dp.callback_query(F.data == "open_switch_lang")
 async def cb_open_switch_lang(callback: CallbackQuery):
+    await callback.answer()
+    
     text = "تريد تغير لغة وضع اللغات منا\nاكو زرين عندك"
     btn_eng = InlineKeyboardButton(text="eNG", callback_data="set_lang_eNG", style="primary")
     btn_rus = InlineKeyboardButton(text="rUS", callback_data="set_lang_rUS", style="primary")
@@ -359,6 +361,7 @@ async def cb_open_switch_lang(callback: CallbackQuery):
 
 @dp.callback_query(F.data.in_({"set_lang_eNG", "set_lang_rUS"}))
 async def cb_set_language(callback: CallbackQuery):
+    await callback.answer()
     user_id = callback.from_user.id
     chosen = "eNG" if callback.data == "set_lang_eNG" else "rUS"
     user_target_lang[user_id] = chosen
@@ -381,6 +384,7 @@ async def cb_set_language(callback: CallbackQuery):
 
 @dp.callback_query(F.data == "back_to_edit")
 async def cb_back_to_edit(callback: CallbackQuery):
+    await callback.answer()
     user_id = callback.from_user.id
     is_active = user_id in lang_mode_users
     text = "تريد تغير لغة وضع اللغات دوس ع الزر الفوك يسار\nتريد تفعل وضع اللغات دوس ع الزر الفوك يمين"
@@ -392,6 +396,7 @@ async def cb_back_to_edit(callback: CallbackQuery):
 
 @dp.callback_query(F.data == "clear_edit_menu")
 async def cb_clear_edit_menu(callback: CallbackQuery):
+    await callback.answer()
     chat_id = callback.message.chat.id
     msg_id = callback.message.message_id
     reply_to = callback.message.reply_to_message
