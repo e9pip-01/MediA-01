@@ -147,23 +147,107 @@ async def handle_reaction(message: Message, chat_type: ChatType, is_owner: bool,
         pass
 
 async def send_typing_animated(chat_id: int, text: str, reply_to_id: int) -> Message:
+    lines = text.split('\n')
+    words_per_line = [line.split() for line in lines]
+    max_words = max(len(w) for w in words_per_line) if words_per_line else 0
+
+    steps = []
+    pattern = [2, 3, 4]
+    pat_idx = 0
+    curr_w = 0
+
+    while curr_w < max_words:
+        step_inc = pattern[pat_idx % len(pattern)]
+        curr_w += step_inc
+        pat_idx += 1
+        
+        step_lines = []
+        for line_words in words_per_line:
+            taken = line_words[:min(curr_w, len(line_words))]
+            step_lines.append(" ".join(taken))
+        steps.append("\n".join(step_lines))
+
+    if not steps:
+        steps = [text]
+
     sent_msg = await bot.send_message(
         chat_id=chat_id,
-        text=text,
+        text=steps[0],
         reply_to_message_id=reply_to_id if reply_to_id > 0 else None
     )
 
-    chosen_e = random.choice(EMOJIS_LIST)
-    try:
-        await bot.send_message(
-            chat_id=chat_id,
-            text=chosen_e,
-            reply_to_message_id=sent_msg.message_id
-        )
-    except Exception:
-        pass
+    emoji_sent = False
+    for i in range(1, len(steps)):
+        await asyncio.sleep(0.3)
+        try:
+            await bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=sent_msg.message_id,
+                text=steps[i]
+            )
+        except Exception:
+            pass
+        
+        if i == 1 and not emoji_sent:
+            emoji_sent = True
+            chosen_e = random.choice(EMOJIS_LIST)
+            try:
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=chosen_e,
+                    reply_to_message_id=sent_msg.message_id
+                )
+            except Exception:
+                pass
+
+    if len(steps) <= 1 and not emoji_sent:
+        chosen_e = random.choice(EMOJIS_LIST)
+        try:
+            await bot.send_message(
+                chat_id=chat_id,
+                text=chosen_e,
+                reply_to_message_id=sent_msg.message_id
+            )
+        except Exception:
+            pass
 
     return sent_msg
+
+async def edit_typing_animated(chat_id: int, message_id: int, text: str):
+    lines = text.split('\n')
+    words_per_line = [line.split() for line in lines]
+    max_words = max(len(w) for w in words_per_line) if words_per_line else 0
+
+    steps = []
+    pattern = [2, 3, 4]
+    pat_idx = 0
+    curr_w = 0
+
+    while curr_w < max_words:
+        step_inc = pattern[pat_idx % len(pattern)]
+        curr_w += step_inc
+        pat_idx += 1
+        
+        step_lines = []
+        for line_words in words_per_line:
+            taken = line_words[:min(curr_w, len(line_words))]
+            step_lines.append(" ".join(taken))
+        steps.append("\n".join(step_lines))
+
+    if not steps:
+        steps = [text]
+
+    for i in range(len(steps)):
+        try:
+            await bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=steps[i]
+            )
+        except Exception:
+            pass
+        if i < len(steps) - 1:
+            await asyncio.sleep(0.3)
 
 def build_edit_keyboard(is_active: bool) -> InlineKeyboardMarkup:
     color_style = "danger" if is_active else "primary"
@@ -265,7 +349,7 @@ async def cb_open_switch_lang(callback: CallbackQuery):
     btn_back = InlineKeyboardButton(text="عودة", callback_data="back_to_edit", style="secondary")
     
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [btn_eng, btn_rus],
+        [btn_rus, btn_eng],
         [btn_back]
     ])
     try:
@@ -279,13 +363,13 @@ async def cb_set_language(callback: CallbackQuery):
     chosen = "eNG" if callback.data == "set_lang_eNG" else "rUS"
     user_target_lang[user_id] = chosen
     
-    text = f"تم تغيير لغة وضع اللغات مولاي\nصارت {chosen}"
     try:
-        await callback.message.edit_text(text=text, reply_markup=None)
+        await callback.message.edit_reply_markup(reply_markup=None)
     except Exception:
         pass
-        
-    await asyncio.sleep(1.0)
+
+    text = f"تم تغيير لغة وضع اللغات مولاي\nصارت {chosen}"
+    await edit_typing_animated(callback.message.chat.id, callback.message.message_id, text)
     
     is_active = user_id in lang_mode_users
     edit_text = "تريد تغير لغة وضع اللغات دوس ع الزر الفوك يسار\nتريد تفعل وضع اللغات دوس ع الزر الفوك يمين"
@@ -349,7 +433,7 @@ async def process_download_job(message: Message, url: str):
         entries = info.get('entries', [info])
         batches = [entries[i:i + 8] for i in range(0, len(entries), 8)]
 
-        target_lang = user_target_lang.get(user_id, "rUS")
+        target_lang = user_target_lang.get(user_id, "eNG")
 
         for batch in batches:
             for item in batch:
@@ -359,11 +443,11 @@ async def process_download_job(message: Message, url: str):
                 ext = item.get('ext') or "bin"
 
                 if has_arabic(uploader):
-                    dest = 'ru' if target_lang == "rUS" else 'en'
+                    dest = 'en' if target_lang == "eNG" else 'ru'
                     uploader = translator.translate(uploader, dest=dest).text
                 
                 if has_arabic(title):
-                    dest = 'ru' if target_lang == "rUS" else 'en'
+                    dest = 'en' if target_lang == "eNG" else 'ru'
                     title = translator.translate(title, dest=dest).text
 
                 if has_russian(uploader):
@@ -462,18 +546,18 @@ async def general_message_handler(message: Message):
         return
 
     if user_id in lang_mode_users and chat_type == ChatType.PRIVATE:
-        target_lang = user_target_lang.get(user_id, "rUS")
+        target_lang = user_target_lang.get(user_id, "eNG")
         has_ar = has_arabic(text)
         has_eng = has_english(text)
         has_rus = has_russian(text)
 
         if has_ar and not has_eng and not has_rus:
-            dest = 'ru' if target_lang == "rUS" else 'en'
+            dest = 'en' if target_lang == "eNG" else 'ru'
             translated = translator.translate(text, dest=dest).text
-            if target_lang == "rUS":
-                res = transform_russian(translated)
-            else:
+            if target_lang == "eNG":
                 res = transform_english(translated)
+            else:
+                res = transform_russian(translated)
             sent = await send_typing_animated(chat_id, res, message.message_id)
             asyncio.create_task(handle_reaction(sent, chat_type, False, True))
             return
@@ -498,12 +582,12 @@ async def general_message_handler(message: Message):
             asyncio.create_task(handle_reaction(sent, chat_type, False, True))
             return
 
-        dest = 'ru' if target_lang == "rUS" else 'en'
+        dest = 'en' if target_lang == "eNG" else 'ru'
         translated = translator.translate(text, dest=dest).text
-        if target_lang == "rUS":
-            res = transform_russian(translated)
-        else:
+        if target_lang == "eNG":
             res = transform_english(translated)
+        else:
+            res = transform_russian(translated)
         sent = await send_typing_animated(chat_id, res, message.message_id)
         asyncio.create_task(handle_reaction(sent, chat_type, False, True))
         return
