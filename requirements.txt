@@ -1,4 +1,12 @@
 aiogram
-googletrans
 yt-dlp
-aiohttp
+googletrans
+aiodns
+pycares
+faust-cchardet
+httpx
+orjson
+brotli
+certifi
+dnspython
+redis

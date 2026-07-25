@@ -7,27 +7,31 @@ import asyncio
 import mimetypes
 from typing import Dict, List, Set, Optional
 
+import orjson
+import redis.asyncio as aioredis
 from googletrans import Translator
 import yt_dlp
 
 from aiogram import Bot, Dispatcher, F
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode, ChatType, ChatMemberStatus
 from aiogram.types import (
     Message,
     CallbackQuery,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
-    FSInputFile,
-    BufferedInputFile
+    FSInputFile
 )
-from aiogram.enums import ChatType, ChatMemberStatus
 from aiogram.filters import Command
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 DEV_ID = 8800673233
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
-bot = Bot(token=BOT_TOKEN)
+bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 translator = Translator()
+redis_client = aioredis.from_url(REDIS_URL, decode_responses=True)
 
 lang_mode_users: Set[int] = set()
 user_target_lang: Dict[int, str] = {}
@@ -365,15 +369,7 @@ async def cb_set_language(callback: CallbackQuery):
     user_id = callback.from_user.id
     chosen = "eNG" if callback.data == "set_lang_eNG" else "rUS"
     user_target_lang[user_id] = chosen
-    
-    try:
-        await callback.message.edit_reply_markup(reply_markup=None)
-    except Exception:
-        pass
 
-    text = f"تم تغيير لغة وضع اللغات مولاي\nصارت {chosen}"
-    await edit_typing_animated(callback.message.chat.id, callback.message.message_id, text)
-    
     is_active = user_id in lang_mode_users
     edit_text = "تريد تغير لغة وضع اللغات دوس ع الزر الفوك يسار\nتريد تفعل وضع اللغات دوس ع الزر الفوك يمين"
     kb = build_edit_keyboard(is_active)
@@ -416,80 +412,123 @@ async def process_download_job(message: Message, url: str):
     chat_id = message.chat.id
     user_id = message.from_user.id
     
-    status_msg = await send_typing_animated(
-        chat_id,
-        "دانفذ طلبك انتظر مولاي ماراح اضل هواي\nراح امص عيرك ءعهقءعهقءعهق",
-        message.message_id
+    status_msg = await bot.send_message(
+        chat_id=chat_id,
+        text="دانفذ طلبك انتظر مولاي ماراح اضل هواي\nراح امص عيرك ءعهقءعهقءعهق",
+        reply_to_message_id=message.message_id
     )
+
+    try:
+        cached_file_id = await redis_client.get(f"file_cache:{url}")
+        if cached_file_id:
+            await bot.send_document(
+                chat_id=chat_id,
+                document=cached_file_id,
+                reply_to_message_id=message.message_id
+            )
+            success_msg = "نيكني استاهل تشكني اطيعك مثل\nعديمة الكرامة"
+            try:
+                await bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=status_msg.message_id,
+                    text=success_msg
+                )
+            except Exception:
+                pass
+            return
+    except Exception:
+        pass
+
+    rand_prefix = random.randint(1000, 9999)
+    out_tmpl = f"temp_{chat_id}_{rand_prefix}_%(uploader)s - %(title)s.%(ext)s"
 
     ydl_opts = {
         'format': 'best',
         'quiet': True,
         'no_warnings': True,
+        'outtmpl': out_tmpl,
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+        }
     }
 
     try:
         loop = asyncio.get_event_loop()
-        info = await loop.run_in_executor(None, lambda: yt_dlp.YoutubeDL(ydl_opts).extract_info(url, download=False))
+        info = await loop.run_in_executor(None, lambda: yt_dlp.YoutubeDL(ydl_opts).extract_info(url, download=True))
         
         if not info:
             raise Exception("No info extracted")
 
         entries = info.get('entries', [info])
-        batches = [entries[i:i + 8] for i in range(0, len(entries), 8)]
-
         target_lang = user_target_lang.get(user_id, "eNG")
 
-        for batch in batches:
-            for item in batch:
-                direct_url = item.get('url')
-                uploader = item.get('uploader') or item.get('channel') or "Publisher"
-                title = item.get('title') or "Media"
-                ext = item.get('ext') or "bin"
+        for item in entries:
+            uploader = item.get('uploader') or item.get('channel') or "Publisher"
+            title = item.get('title') or "Media"
+            
+            if has_arabic(uploader):
+                dest = 'en' if target_lang == "eNG" else 'ru'
+                uploader = translator.translate(uploader, dest=dest).text
+            
+            if has_arabic(title):
+                dest = 'en' if target_lang == "eNG" else 'ru'
+                title = translator.translate(title, dest=dest).text
 
-                if has_arabic(uploader):
-                    dest = 'en' if target_lang == "eNG" else 'ru'
-                    uploader = translator.translate(uploader, dest=dest).text
-                
-                if has_arabic(title):
-                    dest = 'en' if target_lang == "eNG" else 'ru'
-                    title = translator.translate(title, dest=dest).text
+            if has_russian(uploader):
+                uploader = transform_russian(uploader)
+            elif has_english(uploader):
+                uploader = transform_english(uploader)
 
-                if has_russian(uploader):
-                    uploader = transform_russian(uploader)
-                elif has_english(uploader):
-                    uploader = transform_english(uploader)
+            if has_russian(title):
+                title = transform_russian(title)
+            elif has_english(title):
+                title = transform_english(title)
 
-                if has_russian(title):
-                    title = transform_russian(title)
-                elif has_english(title):
-                    title = transform_english(title)
+            uploader = filter_uploader(uploader)
+            title = filter_title(title)
 
-                uploader = filter_uploader(uploader)
-                title = filter_title(title)
+            downloaded_file = None
+            if 'requested_downloads' in item and item['requested_downloads']:
+                downloaded_file = item['requested_downloads'][0].get('filepath')
+            elif '_filename' in item:
+                downloaded_file = item['_filename']
 
+            if downloaded_file and os.path.exists(downloaded_file):
+                ext = downloaded_file.split('.')[-1]
                 rand_num = random.randint(100, 999)
-                filename = f"{uploader} - {title}_{rand_num}.{ext}"
-
-                import aiohttp
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(direct_url) as resp:
-                        if resp.status == 200:
-                            data = await resp.read()
-                            content_type = resp.headers.get('Content-Type', '')
-                            mime_ext = mimetypes.guess_extension(content_type.split(';')[0])
-                            if mime_ext:
-                                filename = f"{uploader} - {title}_{rand_num}{mime_ext}"
-                            
-                            document = BufferedInputFile(data, filename=filename)
-                            await bot.send_document(
-                                chat_id=chat_id,
-                                document=document,
-                                reply_to_message_id=message.message_id
-                            )
+                final_name = f"{uploader} - {title}_{rand_num}.{ext}"
+                
+                doc_file = FSInputFile(downloaded_file, filename=final_name)
+                sent_doc = await bot.send_document(
+                    chat_id=chat_id,
+                    document=doc_file,
+                    reply_to_message_id=message.message_id
+                )
+                
+                if sent_doc and sent_doc.document:
+                    file_id = sent_doc.document.file_id
+                    try:
+                        await redis_client.set(f"file_cache:{url}", file_id, ex=86400 * 7)
+                    except Exception:
+                        pass
+                
+                try:
+                    os.remove(downloaded_file)
+                except Exception:
+                    pass
 
         success_msg = "نيكني استاهل تشكني اطيعك مثل\nعديمة الكرامة"
-        await send_typing_animated(chat_id, success_msg, message.message_id)
+        try:
+            await bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=status_msg.message_id,
+                text=success_msg
+            )
+        except Exception:
+            pass
 
     except Exception:
         fail_msg = "الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي"
@@ -500,7 +539,7 @@ async def process_download_job(message: Message, url: str):
                 text=fail_msg
             )
         except Exception:
-            await send_typing_animated(chat_id, fail_msg, message.message_id)
+            pass
 
 async def queue_worker(user_id: int):
     while True:
