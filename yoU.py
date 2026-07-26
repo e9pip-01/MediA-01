@@ -28,6 +28,8 @@ active_downloads = 0
 waiting_count = 0
 
 user_reply_counters = {}
+btn_color_index = 0
+BUTTON_STYLES = ["primary", "success", "danger"]
 
 UPPER_ENG = set("ATFGNMUJL")
 UPPER_RUS = set("АБИ")
@@ -44,12 +46,13 @@ MSG_SIZE_EXCEEDED = "عيرك طويل هواي دادي وكسي مايكدر\n
 MSG_UNSUPPORTED_LINK = "الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي"
 
 def get_admin_inline_keyboard():
+    global btn_color_index
+    current_style = BUTTON_STYLES[btn_color_index]
+    btn_color_index = (btn_color_index + 1) % len(BUTTON_STYLES)
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="ملكوت عيري", url=f"tg://user?id={ADMIN_ID}", style="primary"),
-                InlineKeyboardButton(text="ملكوت عيري", url=f"tg://user?id={ADMIN_ID}", style="success"),
-                InlineKeyboardButton(text="ملكوت عيري", url=f"tg://user?id={ADMIN_ID}", style="danger")
+                InlineKeyboardButton(text="ملكوت عيري", url=f"tg://user?id={ADMIN_ID}", style=current_style)
             ]
         ]
     )
@@ -329,9 +332,6 @@ async def process_download_task(message: Message, url: str):
 
         file_name = os.path.basename(file_path)
 
-        await status_msg.edit_text("✅")
-        await status_msg.edit_reply_markup(reply_markup=get_admin_inline_keyboard())
-
         from aiogram.types import FSInputFile
         input_file = FSInputFile(path=file_path, filename=file_name)
 
@@ -361,15 +361,12 @@ async def update_progress_ui(msg: Message, pct: int):
     except Exception:
         pass
 
-@dp.message(F.text)
+@dp.message(F.text & (F.text != "ادت"))
 async def handle_all_messages(message: Message):
     global active_downloads, waiting_count
 
     user_id = message.from_user.id
     text = message.text.strip()
-
-    if text == "ادت":
-        return
 
     is_link = is_url(text)
     is_yt_tg = is_youtube_or_telegram(text)
@@ -411,7 +408,7 @@ async def handle_all_messages(message: Message):
         has_eng = any(is_english(c) for c in text)
         has_rus = any(is_russian(c) for c in text)
 
-        if has_eng or has_rus:
+        if (has_eng or has_rus) and not any('\u0600' <= c <= '\u06FF' for c in text):
             transformed = transform_general_text(text)
             await send_delayed_reply(message, transformed)
             return
