@@ -1,6 +1,6 @@
 aiogram
 yt-dlp
-googletrans
+deep-translator
 aiodns
 pycares
 faust-cchardet
