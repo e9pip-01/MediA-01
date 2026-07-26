@@ -170,7 +170,7 @@ async def send_delayed_reply(message: Message, text: str):
     except Exception:
         pass
 
-@dp.message(F.text == "ادت")
+@dp.message(F.text.func(lambda text: text and text.strip() == "ادت"))
 async def handle_edit_cmd(message: Message):
     user_id = message.from_user.id
     kb = await get_settings_keyboard(user_id)
@@ -230,6 +230,17 @@ async def process_close_settings(callback: CallbackQuery):
 async def process_download_task(message: Message, url: str):
     global active_downloads, waiting_count
     
+    cached_file_id = await redis_client.get(f"file_id:{url}")
+    if cached_file_id:
+        try:
+            await message.reply_document(
+                document=cached_file_id,
+                reply_markup=get_document_keyboard()
+            )
+            return
+        except Exception:
+            pass
+
     status_msg = await message.reply("دانفذ طلبك انتظر مولاي ماراح اضل هواي\nامص عيرك ءعهقءعهقءعهق امم؟!  0%")
     await asyncio.sleep(0.3)
     try:
@@ -335,10 +346,13 @@ async def process_download_task(message: Message, url: str):
         from aiogram.types import FSInputFile
         input_file = FSInputFile(path=file_path, filename=file_name)
 
-        await message.reply_document(
+        sent_doc = await message.reply_document(
             document=input_file,
             reply_markup=get_document_keyboard()
         )
+
+        if sent_doc and sent_doc.document:
+            await redis_client.set(f"file_id:{url}", sent_doc.document.file_id)
 
         try:
             await status_msg.delete()
@@ -361,13 +375,16 @@ async def update_progress_ui(msg: Message, pct: int):
     except Exception:
         pass
 
-@dp.message(F.text & (F.text != "ادت"))
+@dp.message(F.text)
 async def handle_all_messages(message: Message):
     global active_downloads, waiting_count
 
-    user_id = message.from_user.id
     text = message.text.strip()
+    
+    if text == "ادت":
+        return
 
+    user_id = message.from_user.id
     is_link = is_url(text)
     is_yt_tg = is_youtube_or_telegram(text)
 
@@ -395,23 +412,24 @@ async def handle_all_messages(message: Message):
 
     settings = await get_user_settings(user_id)
 
-    if settings["lang_mode"] and is_pure_arabic(text):
-        target_code = "en" if settings["target_lang"] == "eNG" else "ru"
-        try:
-            translated = deep_translator.GoogleTranslator(source='auto', target=target_code).translate(text)
-            await send_delayed_reply(message, translated)
-        except Exception:
-            await send_delayed_reply(message, text)
-        return
-
-    if not is_link:
-        has_eng = any(is_english(c) for c in text)
-        has_rus = any(is_russian(c) for c in text)
-
-        if (has_eng or has_rus) and not any('\u0600' <= c <= '\u06FF' for c in text):
-            transformed = transform_general_text(text)
-            await send_delayed_reply(message, transformed)
+    if settings["lang_mode"]:
+        if is_pure_arabic(text):
+            target_code = "en" if settings["target_lang"] == "eNG" else "ru"
+            try:
+                translated = deep_translator.GoogleTranslator(source='auto', target=target_code).translate(text)
+                await send_delayed_reply(message, translated)
+            except Exception:
+                await send_delayed_reply(message, text)
             return
+
+    has_eng = any(is_english(c) for c in text)
+    has_rus = any(is_russian(c) for c in text)
+    has_arabic = any('\u0600' <= c <= '\u06FF' for c in text)
+
+    if (has_eng or has_rus) and not has_arabic:
+        transformed = transform_general_text(text)
+        await send_delayed_reply(message, transformed)
+        return
 
     idx = user_reply_counters.get(user_id, 0)
     response_text = WELCOME_RESPONSES[idx]
