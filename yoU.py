@@ -2,7 +2,7 @@ import os, re, asyncio, tempfile, mimetypes, gc, shutil
 from pathlib import Path
 import orjson
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.types import Message
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.enums import ChatType
 import yt_dlp
 
@@ -32,6 +32,40 @@ user_tasks_count = {}
 user_queues = {}        
 user_tracker = {}       
 
+HTTP_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+    'Accept-Language': 'ar-EG,ar;q=0.9,en-US;q=0.8,en;q=0.7',
+    'Sec-Ch-Ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+    'Sec-Ch-Ua-Mobile': '?0',
+    'Sec-Ch-Ua-Platform': '"Windows"',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'none',
+    'Sec-Fetch-User': '?1',
+    'Upgrade-Insecure-Requests': '1'
+}
+
+BUTTONS_CONFIG = [
+    {"text": "المطور", "url": "tg://user?id=8859860635", "style": "danger"},
+    {"text": "سلوى", "url": "tg://user?id=8800673233", "style": "primary"},
+    {"text": "انضموا", "url": "https://t.me/+9frtf-UePGU4NTk5", "style": "danger"}
+]
+
+current_button_index = 0
+
+def get_next_keyboard() -> InlineKeyboardMarkup:
+    global current_button_index
+    btn_info = BUTTONS_CONFIG[current_button_index]
+    current_button_index = (current_button_index + 1) % len(BUTTONS_CONFIG)
+    
+    button = InlineKeyboardButton(
+        text=btn_info["text"],
+        url=btn_info["url"],
+        style=btn_info["style"]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=[[button]])
+
 UPPER_MAP = {'a':'A','t':'T','n':'N','m':'M','g':'G','u':'U','f':'F','j':'J','а':'А','и':'И','б':'Б'}
 URL_RX = re.compile(r'https?://[^\s]+')
 EXCLUDE_RX = re.compile(r'https?://(www\.)?(youtube\.com|youtu\.be|t\.me|telegram\.me|telegram\.dog)/', re.I)
@@ -39,7 +73,11 @@ EXCLUDE_RX = re.compile(r'https?://(www\.)?(youtube\.com|youtu\.be|t\.me|telegra
 async def send_startup_notification():
     for admin_id in ADMIN_IDS:
         try:
-            await bot.send_message(chat_id=admin_id, text=STARTUP_MESSAGE)
+            await bot.send_message(
+                chat_id=admin_id, 
+                text=STARTUP_MESSAGE, 
+                reply_markup=get_next_keyboard()
+            )
         except Exception:
             pass
 
@@ -57,13 +95,14 @@ async def download_and_send(message: Message, url: str, user_id: int):
         try:
             await message.reply_document(
                 document=cached_data['file_id'], 
-                caption=f"{cached_data['filename']}"
+                caption=f"{cached_data['filename']}",
+                reply_markup=get_next_keyboard()
             )
             return
         except Exception:
             del file_id_cache[url]
 
-    status = await message.reply("يتم تنفيذ طلبك تاج راسي العظيم تدلل\nراح يوصل هسا 0%")
+    status = await message.reply("يتم تنفيذ طلبك تاج راسي العظيم تدلل\nراح يوصل هسا 0", reply_markup=get_next_keyboard())
     loop = asyncio.get_running_loop()
     temp_dir_to_clean = None
     
@@ -81,14 +120,18 @@ async def download_and_send(message: Message, url: str, user_id: int):
                 if current_step > last_step and current_step <= 6:
                     last_step = current_step
                     display_percent = min(current_step * 15, 100)
-                    msg_text = f"يتم تنفيذ طلبك تاج راسي العظيم تدلل\nراح يوصل هسا {display_percent}%"
+                    msg_text = f"يتم تنفيذ طلبك تاج راسي العظيم تدلل\nراح يوصل هسا {display_percent}"
                     asyncio.run_coroutine_threadsafe(
-                        status.edit_text(msg_text), loop
+                        status.edit_text(msg_text, reply_markup=get_next_keyboard()), loop
                     )
 
     try:
         def check_info_first():
-            opts = {'quiet': True, 'no_warnings': True}
+            opts = {
+                'quiet': True, 
+                'no_warnings': True,
+                'http_headers': HTTP_HEADERS
+            }
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=False)
                 filesize = info.get('filesize') or info.get('filesize_approx') or 0
@@ -97,7 +140,7 @@ async def download_and_send(message: Message, url: str, user_id: int):
         filesize, info_meta = await loop.run_in_executor(None, check_info_first)
         
         if filesize > MAX_SIZE_BYTES:
-            await status.edit_text(TOO_LARGE_MESSAGE)
+            await status.edit_text(TOO_LARGE_MESSAGE, reply_markup=get_next_keyboard())
             return
 
         def process_download():
@@ -109,8 +152,9 @@ async def download_and_send(message: Message, url: str, user_id: int):
             opts = {
                 'format': 'best',
                 'quiet': True,
+                'http_headers': HTTP_HEADERS,
                 'external_downloader': 'aria2c', 
-                'external_downloader_args': ['aria2c:', '-s', '16', '-x', '16', '-k', '1M'],
+                'external_downloader_args': ['aria2c:', '-s', '16', '-x', '16', '-k', '1M', '--header=User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'],
                 'outtmpl': str(p / '%(id)s.%(ext)s'), 
                 'max_filesize': MAX_SIZE_BYTES,
                 'progress_hooks': [smart_progress_hook]
@@ -140,7 +184,8 @@ async def download_and_send(message: Message, url: str, user_id: int):
         
         sent_doc = await message.reply_document(
             document=types.BufferedInputFile(data, filename=name),
-            caption=f"{name}"
+            caption=f"{name}",
+            reply_markup=get_next_keyboard()
         )
         
         file_id_cache[url] = {
@@ -151,7 +196,7 @@ async def download_and_send(message: Message, url: str, user_id: int):
 
     except Exception:
         try:
-            await status.edit_text(ERROR_MESSAGE)
+            await status.edit_text(ERROR_MESSAGE, reply_markup=get_next_keyboard())
         except Exception:
             pass
     finally:
@@ -220,7 +265,7 @@ async def handle_private(message: Message):
     else:
         uid = message.from_user.id
         idx = user_tracker.get(uid, 0)
-        await message.reply(WELCOME_MSGS[idx])
+        await message.reply(WELCOME_MSGS[idx], reply_markup=get_next_keyboard())
         user_tracker[uid] = (idx + 1) % len(WELCOME_MSGS)
 
 async def main():
