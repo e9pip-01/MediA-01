@@ -9,7 +9,7 @@ import urllib.request
 from pathlib import Path
 import orjson
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto, InputMediaVideo
 from aiogram.enums import ChatType
 import yt_dlp
 
@@ -86,14 +86,18 @@ async def download_and_send(message: Message, url: str, user_id: int):
     if url in file_id_cache:
         cached_data = file_id_cache[url]
         try:
-            await message.reply_document(
-                document=cached_data['file_id'], 
-                caption=f"{cached_data['filename']}",
-                reply_markup=get_next_keyboard()
-            )
+            if isinstance(cached_data, list):
+                for media_group in cached_data:
+                    await message.reply_media_group(media=media_group)
+            else:
+                await message.reply_document(
+                    document=cached_data['file_id'], 
+                    reply_markup=get_next_keyboard()
+                )
             return
         except Exception:
-            del file_id_cache[url]
+            if url in file_id_cache:
+                del file_id_cache[url]
 
     status = await message.reply("يتم تنفيذ طلبك تاج راسي العظيم تدلل\nراح يوصل هسا", reply_markup=get_next_keyboard())
     loop = asyncio.get_running_loop()
@@ -117,19 +121,15 @@ async def download_and_send(message: Message, url: str, user_id: int):
             opts = {
                 'quiet': True, 
                 'no_warnings': True,
-                'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+                'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'extract_flat': 'in_playlist'
             }
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=False)
-                filesize = info.get('filesize') or info.get('filesize_approx') or 0
-                return filesize, info
+                return info
 
-        filesize, info_meta = await loop.run_in_executor(None, check_info_first)
+        info_meta = await loop.run_in_executor(None, check_info_first)
         
-        if filesize > MAX_SIZE_BYTES:
-            await status.edit_text(TOO_LARGE_MESSAGE, reply_markup=get_next_keyboard())
-            return
-
         def process_download():
             nonlocal temp_dir_to_clean
             tmp_dir = tempfile.mkdtemp()
@@ -140,7 +140,7 @@ async def download_and_send(message: Message, url: str, user_id: int):
                 'format': 'bestvideo+bestaudio/best',
                 'quiet': True,
                 'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                'outtmpl': str(p / '%%(id)s.%%(ext)s'), 
+                'outtmpl': str(p / '%%(autonumber)03d_%%(id)s.%%(ext)s'), 
                 'max_filesize': MAX_SIZE_BYTES,
                 'progress_hooks': [smart_progress_hook],
                 'embedsubtitles': True,
@@ -154,55 +154,98 @@ async def download_and_send(message: Message, url: str, user_id: int):
             
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=True)
-                fpath = Path(ydl.prepare_filename(info))
                 
-                clean = lambda s: re.sub(r'\s+', ' ', re.sub(r'[^a-zA-Z0-9\u0600-\u06FF\u0400-\u04FF\s]', '', "".join(UPPER_MAP.get(c, c) for c in (s or "").lower()))).strip()
+                downloaded_entries = []
+                if 'entries' in info:
+                    downloaded_entries = list(info['entries'])
+                else:
+                    downloaded_entries = [info]
                 
-                mime = info.get('mime_type') or (info.get('requested_downloads', [{}])[0].get('mime_type') if info.get('requested_downloads') else None)
-                if not mime and fpath.exists(): 
-                    mime, _ = mimetypes.guess_type(str(fpath))
-                ext = (mimetypes.guess_extension(mime.split(';')[0].strip().lower()) or "").lstrip('.') if mime else info.get('ext', '')
-                if not ext and fpath.exists():
-                    ext = fpath.suffix.lstrip('.')
+                downloaded_files = sorted(list(p.glob('*')))
+                media_items = []
                 
-                uploader = clean(info.get('uploader') or info.get('uploader_id')) or 'Uploader'
-                title = clean(info.get('title')) or 'Media'
-                name = f"[{uploader}] - [{title}]" + (f".{ext}" if ext else "")
-                
-                new_p = p / name
-                if fpath.exists(): 
-                    fpath.rename(new_p)
-                
-                thumb_url = info.get('thumbnail')
-                thumb_path = None
-                if thumb_url:
-                    try:
-                        t_path = p / "thumb.jpg"
-                        req = urllib.request.Request(thumb_url, headers={'User-Agent': 'Mozilla/5.0'})
-                        with urllib.request.urlopen(req) as response, open(t_path, 'wb') as out_file:
-                            out_file.write(response.read())
-                        if t_path.exists():
-                            thumb_path = str(t_path)
-                    except Exception:
-                        thumb_path = None
+                for idx, entry in enumerate(downloaded_entries):
+                    if not entry:
+                        continue
+                    
+                    target_file = None
+                    prefix = f"{idx+1:03d}_"
+                    for f in downloaded_files:
+                        if f.name.startswith(prefix) or entry.get('id') in f.name:
+                            target_file = f
+                            break
+                    
+                    if not target_file or not target_file.exists() or target_file.name == "thumb.jpg":
+                        continue
                         
-                return str(new_p), name, thumb_path
+                    raw_uploader = entry.get('uploader') or entry.get('uploader_id') or info.get('uploader') or info.get('uploader_id') or 'Uploader'
+                    raw_title = entry.get('title') or 'Media'
+                    
+                    mapped_uploader = "".join(UPPER_MAP.get(c, c) for c in raw_uploader.lower())
+                    mapped_title = "".join(UPPER_MAP.get(c, c) for c in raw_title.lower())
+                    
+                    clean_uploader = re.sub(r'[^a-zA-Z0-9\u0600-\u06FF\u0400-\u04FF\s_]', '', mapped_uploader)
+                    clean_uploader = re.sub(r'\s+', ' ', clean_uploader).strip()
+                    
+                    clean_title = re.sub(r'[^a-zA-Z0-9\u0600-\u06FF\u0400-\u04FF\s]', '', mapped_title)
+                    clean_title = re.sub(r'\s+', ' ', clean_title).strip()
+                    
+                    if not clean_uploader:
+                        clean_uploader = "Uploader"
+                    if not clean_title:
+                        clean_title = "Media"
+                    
+                    mime, _ = mimetypes.guess_type(str(target_file))
+                    ext = target_file.suffix.lstrip('.')
+                    
+                    name = f"{clean_uploader} - {clean_title}" + (f".{ext}" if ext else "")
+                    new_p = p / name
+                    target_file.rename(new_p)
+                    
+                    media_items.append({'path': str(new_p), 'name': name, 'mime': mime})
+                    
+                return media_items
 
-        file_path, name, thumb_file_path = await loop.run_in_executor(None, process_download)
+        media_results = await loop.run_in_executor(None, process_download)
         
-        tg_thumb = types.FSInputFile(thumb_file_path) if thumb_file_path else None
+        if not media_results:
+            raise Exception("No files downloaded")
+            
+        album_cache_data = []
         
-        sent_doc = await message.reply_document(
-            document=types.FSInputFile(path=file_path, filename=name),
-            thumbnail=tg_thumb,
-            caption=f"{name}",
-            reply_markup=get_next_keyboard()
-        )
-        
-        file_id_cache[url] = {
-            'file_id': sent_doc.document.file_id,
-            'filename': name
-        }
+        if len(media_results) == 1:
+            res = media_results[0]
+            sent_doc = await message.reply_document(
+                document=types.FSInputFile(path=res['path'], filename=res['name']),
+                reply_markup=get_next_keyboard()
+            )
+            file_id_cache[url] = {
+                'file_id': sent_doc.document.file_id,
+                'filename': res['name']
+            }
+        else:
+            chunks = [media_results[i:i + 8] for i in range(0, len(media_results), 8)]
+            for chunk in chunks:
+                media_group = []
+                for item in chunk:
+                    mime = item['mime'] or ""
+                    fs_file = types.FSInputFile(path=item['path'], filename=item['name'])
+                    
+                    if mime.startswith('image'):
+                        media_group.append(InputMediaPhoto(media=fs_file))
+                    elif mime.startswith('video'):
+                        media_group.append(InputMediaVideo(media=fs_file))
+                    else:
+                        media_group.append(InputMediaVideo(media=fs_file) if item['name'].endswith(('mp4', 'mkv', 'webm')) else InputMediaPhoto(media=fs_file))
+                
+                if media_group:
+                    sent_group = await message.reply_media_group(media=media_group)
+                    group_ids = [m.photo[-1].file_id if m.photo else m.video.file_id for m in sent_group]
+                    album_cache_data.append(group_ids)
+            
+            if album_cache_data:
+                file_id_cache[url] = album_cache_data
+                
         await status.delete()
 
     except Exception:
