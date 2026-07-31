@@ -4,7 +4,7 @@ import asyncio
 import mimetypes
 from collections import defaultdict
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 from aiogram.enums import ButtonStyle, ChatType
 from aiogram.fsm.storage.redis import RedisStorage
 from redis.asyncio import Redis
@@ -20,9 +20,6 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=storage)
 
 TARGET_UPPER = set("ATFGNMUJLАБИ")
-
-USER_STATES = {}
-LAST_DONE_BTN_INFO = {}
 
 ROTATING_TEXTS = [
     "اهلين وياك بوت ميديا تريد اشتغل \nدز رابط وتدلل",
@@ -40,35 +37,12 @@ USER_WAITING_COUNT = defaultdict(int)
 MAX_WAITING_ALLOWED = 3
 
 NOTIFY_IDS = [8859860635, 8800673233]
-ADMIN_IDS = {8859860635, 8800673233}
 
 async def send_startup_notifications():
     text = "اشتغل البوت مرتلخ مولاي\nارضع عيرك ؟!"
     for user_id in NOTIFY_IDS:
         try:
             await bot.send_message(chat_id=user_id, text=text)
-        except Exception:
-            pass
-
-async def get_next_sticker():
-    stickers = await redis_client.lrange("bot:welcome_stickers", 0, -1)
-    if not stickers:
-        return None
-    
-    idx_raw = await redis_client.get("bot:sticker_index")
-    idx = int(idx_raw) if idx_raw else 0
-    
-    stk_bytes = stickers[idx % len(stickers)]
-    next_idx = (idx + 1) % len(stickers)
-    await redis_client.set("bot:sticker_index", next_idx)
-    
-    return stk_bytes.decode('utf-8')
-
-async def send_welcome_sticker(chat_id: int):
-    stk = await get_next_sticker()
-    if stk:
-        try:
-            await bot.send_sticker(chat_id=chat_id, sticker=stk)
         except Exception:
             pass
 
@@ -120,70 +94,6 @@ async def get_next_button_markup() -> InlineKeyboardMarkup:
         
     return InlineKeyboardMarkup(inline_keyboard=[[btn]])
 
-async def check_sticker_permission(message: Message) -> bool:
-    chat_type = message.chat.type
-    
-    if chat_type == ChatType.PRIVATE:
-        return message.from_user.id in ADMIN_IDS
-        
-    elif chat_type in (ChatType.GROUP, ChatType.SUPERGROUP):
-        try:
-            member = await bot.get_chat_member(chat_id=message.chat.id, user_id=message.from_user.id)
-            return member.status in ("creator", "administrator")
-        except Exception:
-            return False
-            
-    elif chat_type == ChatType.CHANNEL:
-        try:
-            bot_member = await bot.get_chat_member(chat_id=message.chat.id, user_id=(await bot.get_me()).id)
-            return bot_member.status == "administrator"
-        except Exception:
-            return False
-            
-    return False
-
-@dp.message(F.text == "ستيكر ويلكوم")
-async def start_sticker_addition(message: Message):
-    has_perm = await check_sticker_permission(message)
-    if not has_perm:
-        return
-        
-    USER_STATES[message.chat.id] = "WAITING_STICKERS"
-    await message.reply("¹# - ارسل الان الملصق لاضافته مع رسائل\nالبوت")
-
-@dp.message(F.sticker)
-async def handle_sticker_input(message: Message):
-    chat_id = message.chat.id
-    if USER_STATES.get(chat_id) == "WAITING_STICKERS":
-        await redis_client.rpush("bot:welcome_stickers", message.sticker.file_id)
-        
-        if chat_id in LAST_DONE_BTN_INFO:
-            prev_chat_id, prev_msg_id = LAST_DONE_BTN_INFO[chat_id]
-            try:
-                await bot.edit_message_reply_markup(
-                    chat_id=prev_chat_id,
-                    message_id=prev_msg_id,
-                    reply_markup=None
-                )
-            except Exception:
-                pass
-        
-        done_markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="تم", callback_data="finish_stickers", style=ButtonStyle.SUCCESS)]])
-        sent_msg = await message.reply(
-            "¹# - الملصق اللذي ارسلته اصبح مضاف مع\nرسائل الويلكوم",
-            reply_markup=done_markup
-        )
-        LAST_DONE_BTN_INFO[chat_id] = (sent_msg.chat.id, sent_msg.message_id)
-
-@dp.callback_query(F.data == "finish_stickers")
-async def finish_stickers_callback(callback_query: CallbackQuery):
-    chat_id = callback_query.message.chat.id
-    USER_STATES.pop(chat_id, None)
-    LAST_DONE_BTN_INFO.pop(chat_id, None)
-    
-    await callback_query.message.edit_text("¹# - اكتمال اضافه ملصقات الويلكوم كما ارسلتها\nاوامرك فوك راسي")
-    await callback_query.answer()
-
 async def process_media_download(message: Message):
     user_id = message.from_user.id if message.from_user else message.chat.id
     url = message.text.strip()
@@ -198,15 +108,12 @@ async def process_media_download(message: Message):
                 document=file_id_str,
                 reply_to_message_id=message.message_id
             )
-            await send_welcome_sticker(message.chat.id)
             await message.reply("نيكني استاهل تشكني اطيعك مثل\nعديمة الكرامة")
-            await send_welcome_sticker(message.chat.id)
             return
         except Exception:
             pass
 
     await message.reply("راح انفذ طلبك مولاي ودامص عيرك\nالعظيم بكل الوضعيات الزانية")
-    await send_welcome_sticker(message.chat.id)
     
     ydl_opts_info = {
         'quiet': True,
@@ -325,10 +232,7 @@ async def process_media_download(message: Message):
         if sent_doc_msg.document:
             await redis_client.set(cache_key, sent_doc_msg.document.file_id)
             
-        await send_welcome_sticker(message.chat.id)
-        
         await message.reply("نيكني استاهل تشكني اطيعك مثل\nعديمة الكرامة")
-        await send_welcome_sticker(message.chat.id)
         
     except Exception:
         await message.reply("الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي")
@@ -358,9 +262,6 @@ async def media_handler(message: Message):
 
 @dp.message(F.text)
 async def text_handler(message: Message):
-    if message.text == "ستيكر ويلكوم":
-        return
-        
     chat_type = message.chat.type
     
     if chat_type in (ChatType.GROUP, ChatType.SUPERGROUP, ChatType.CHANNEL):
@@ -374,7 +275,6 @@ async def text_handler(message: Message):
     markup = await get_next_button_markup()
     
     await message.reply(current_text, reply_markup=markup)
-    await send_welcome_sticker(message.chat.id)
 
 async def main():
     await send_startup_notifications()
