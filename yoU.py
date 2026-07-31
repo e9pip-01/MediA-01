@@ -5,10 +5,9 @@ import tempfile
 import mimetypes
 import gc
 import shutil
-import urllib.request
 import random
 from pathlib import Path
-import orjson
+import redis.asyncio as aioredis
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto, InputMediaVideo
 from aiogram.enums import ChatType
@@ -16,6 +15,9 @@ import yt_dlp
 
 bot = Bot(token=os.getenv("BOT_TOKEN"))
 dp = Dispatcher()
+
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+redis_client = aioredis.from_url(REDIS_URL, decode_responses=True)
 
 ADMIN_IDS = [8859860635, 8800673233]
 STARTUP_MESSAGE = "اشتغل البوت مرتلخ مولاي\nارضع عيرك ؟!"
@@ -36,7 +38,6 @@ ERROR_MESSAGE = "الرابط غير مدعوم او الموقع مو مدعو�
 TOO_LARGE_MESSAGE = "عيرك طويل هواي دادي وكسي مايكدر\nيشيل هلكد عير"
 ALBUM_SUCCESS_MESSAGE = "تم تنفيذ طلبك تاج راسي العظيم تدلل\nمنو اطيع من بعدك"
 
-file_id_cache = {}
 user_tasks_count = {}   
 user_queues = {}        
 user_tracker = {}       
@@ -53,9 +54,16 @@ EMOJIS_LIST = ["😁", "😡", "🌭", "😭", "😘", "🍓", "🤣", "🥰"]
 TIMES_LIST = [2.4, 4.2, 4.8, 3.6, 3.2, 2.3]
 FOODS_LIST = ["🥞", "🍕", "🍔", "🌭", "🥪"]
 
+CHROME_USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+]
+
 current_emojis_pool = []
 current_times_pool = []
 current_foods_pool = []
+current_ua_pool = []
 
 def get_next_emoji() -> str:
     global current_emojis_pool
@@ -77,6 +85,63 @@ def get_next_food() -> str:
         current_foods_pool = FOODS_LIST.copy()
         random.shuffle(current_foods_pool)
     return current_foods_pool.pop()
+
+def get_next_ua() -> str:
+    global current_ua_pool
+    if not current_ua_pool:
+        current_ua_pool = CHROME_USER_AGENTS.copy()
+        random.shuffle(current_ua_pool)
+    return current_ua_pool.pop()
+
+def get_chrome_ytdl_options(download_path: str = None, progress_hook=None) -> dict:
+    ua = get_next_ua()
+    opts = {
+        'quiet': True,
+        'no_warnings': True,
+        'http_chunk_size': 10485760,
+        'concurrent_fragment_downloads': 5,
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'web'],
+                'impersonate': 'chrome'
+            },
+            'instagram': {
+                'impersonate': 'chrome'
+            }
+        },
+        'http_headers': {
+            'User-Agent': ua,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': 'en-US,en;q=0.9,ar;q=0.8',
+            'Sec-Ch-Ua': '"Not/A)Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1'
+        }
+    }
+    
+    if download_path:
+        opts.update({
+            'format': 'bestvideo[*][ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best',
+            'outtmpl': f"{download_path}/%%(autonumber)03d_%%(id)s.%%(ext)s",
+            'max_filesize': MAX_SIZE_BYTES,
+            'progress_hooks': [progress_hook] if progress_hook else [],
+            'embedsubtitles': True,
+            'writesubtitles': True,
+            'writeautomaticsub': True,
+            'subtitleslangs': ['ar'],
+            'postprocessor_args': {
+                'merger': ['-c:v', 'copy', '-c:a', 'copy', '-c:s', 'copy', '-map', '0']
+            }
+        })
+    else:
+        opts['extract_flat'] = 'in_playlist'
+        
+    return opts
 
 async def apply_delayed_reaction(chat_id: int, message_id: int):
     delay = get_next_time()
@@ -133,26 +198,17 @@ def reset_all_except_file_id(temp_dir_path: str = None):
     gc.collect()
 
 async def download_and_send(message: Message, url: str, user_id: int):
-    if url in file_id_cache:
-        cached_data = file_id_cache[url]
+    cached_file_id = await redis_client.get(f"cache_file:{url}")
+    if cached_file_id:
         try:
-            if isinstance(cached_data, list):
-                for media_group in cached_data:
-                    sent_group = await message.reply_media_group(media=media_group)
-                    for m in sent_group:
-                        asyncio.create_task(apply_delayed_reaction(m.chat.id, m.message_id))
-                last_msg = await message.reply(ALBUM_SUCCESS_MESSAGE, reply_markup=get_next_keyboard())
-                asyncio.create_task(apply_delayed_reaction(last_msg.chat.id, last_msg.message_id))
-            else:
-                sent_doc = await message.reply_document(
-                    document=cached_data['file_id'], 
-                    reply_markup=get_next_keyboard()
-                )
-                asyncio.create_task(apply_delayed_reaction(sent_doc.chat.id, sent_doc.message_id))
+            sent_doc = await message.reply_document(
+                document=cached_file_id, 
+                reply_markup=get_next_keyboard()
+            )
+            asyncio.create_task(apply_delayed_reaction(sent_doc.chat.id, sent_doc.message_id))
             return
         except Exception:
-            if url in file_id_cache:
-                del file_id_cache[url]
+            await redis_client.delete(f"cache_file:{url}")
 
     status = await message.reply("يتم تنفيذ طلبك تاج راسي العظيم تدلل\nراح يوصل هسا", reply_markup=get_next_keyboard())
     asyncio.create_task(apply_delayed_reaction(status.chat.id, status.message_id))
@@ -184,16 +240,12 @@ async def download_and_send(message: Message, url: str, user_id: int):
 
     try:
         def check_info_first():
-            opts = {
-                'quiet': True, 
-                'no_warnings': True,
-                'extract_flat': 'in_playlist'
-            }
+            opts = get_chrome_ytdl_options()
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=False)
                 return info
 
-        info_meta = await loop.run_in_executor(None, check_info_first)
+        await loop.run_in_executor(None, check_info_first)
         
         def process_download():
             nonlocal temp_dir_to_clean
@@ -201,20 +253,7 @@ async def download_and_send(message: Message, url: str, user_id: int):
             temp_dir_to_clean = tmp_dir
             p = Path(tmp_dir)
             
-            opts = {
-                'format': 'bestvideo+bestaudio/best',
-                'quiet': True,
-                'outtmpl': str(p / '%%(autonumber)03d_%%(id)s.%%(ext)s'), 
-                'max_filesize': MAX_SIZE_BYTES,
-                'progress_hooks': [smart_progress_hook],
-                'embedsubtitles': True,
-                'writesubtitles': True,
-                'writeautomaticsub': True,
-                'subtitleslangs': ['ar'],
-                'postprocessor_args': {
-                    'merger': ['-c:v', 'copy', '-c:a', 'copy', '-c:s', 'copy', '-map', '0']
-                }
-            }
+            opts = get_chrome_ytdl_options(download_path=str(p), progress_hook=smart_progress_hook)
             
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=True)
@@ -275,8 +314,6 @@ async def download_and_send(message: Message, url: str, user_id: int):
         if not media_results:
             raise Exception("No files downloaded")
             
-        album_cache_data = []
-        
         if len(media_results) == 1:
             res = media_results[0]
             sent_doc = await status.edit_media(
@@ -286,10 +323,7 @@ async def download_and_send(message: Message, url: str, user_id: int):
                 reply_markup=get_next_keyboard()
             )
             asyncio.create_task(apply_delayed_reaction(sent_doc.chat.id, sent_doc.message_id))
-            file_id_cache[url] = {
-                'file_id': sent_doc.document.file_id,
-                'filename': res['name']
-            }
+            await redis_client.set(f"cache_file:{url}", sent_doc.document.file_id, ex=86400)
         else:
             await status.delete()
             chunks = [media_results[i:i + 8] for i in range(0, len(media_results), 8)]
@@ -310,13 +344,9 @@ async def download_and_send(message: Message, url: str, user_id: int):
                     sent_group = await message.reply_media_group(media=media_group)
                     for m in sent_group:
                         asyncio.create_task(apply_delayed_reaction(m.chat.id, m.message_id))
-                    group_ids = [m.photo[-1].file_id if m.photo else m.video.file_id for m in sent_group]
-                    album_cache_data.append(group_ids)
             
             last_msg = await message.reply(ALBUM_SUCCESS_MESSAGE, reply_markup=get_next_keyboard())
             asyncio.create_task(apply_delayed_reaction(last_msg.chat.id, last_msg.message_id))
-            if album_cache_data:
-                file_id_cache[url] = album_cache_data
 
     except Exception:
         try:
