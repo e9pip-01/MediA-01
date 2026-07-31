@@ -6,6 +6,7 @@ import mimetypes
 import gc
 import shutil
 import urllib.request
+import random
 from pathlib import Path
 import orjson
 from aiogram import Bot, Dispatcher, types, F
@@ -33,6 +34,7 @@ WELCOME_MSGS = [
 
 ERROR_MESSAGE = "الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي"
 TOO_LARGE_MESSAGE = "عيرك طويل هواي دادي وكسي مايكدر\nيشيل هلكد عير"
+ALBUM_SUCCESS_MESSAGE = "تم تنفيذ طلبك تاج راسي العظيم تدلل\nمنو اطيع من بعدك"
 
 file_id_cache = {}
 user_tasks_count = {}   
@@ -45,19 +47,59 @@ BUTTONS_CONFIG = [
     {"text": "انضموا", "url": "https://t.me/+9frtf-UePGU4NTk5", "style": "danger"}
 ]
 
-current_button_index = 0
+sequence_index = 0
+
+EMOJIS_LIST = ["😁", "😡", "🌭", "😭", "😘", "🍓", "🤣", "🥰"]
+TIMES_LIST = [2.4, 4.2, 4.8, 3.6, 3.2, 2.3]
+FOODS_LIST = ["🥞", "🍕", "🍔", "🌭", "🥪"]
+
+current_emojis_pool = []
+current_times_pool = []
+current_foods_pool = []
+
+def get_next_emoji() -> str:
+    global current_emojis_pool
+    if not current_emojis_pool:
+        current_emojis_pool = EMOJIS_LIST.copy()
+        random.shuffle(current_emojis_pool)
+    return current_emojis_pool.pop()
+
+def get_next_time() -> float:
+    global current_times_pool
+    if not current_times_pool:
+        current_times_pool = TIMES_LIST.copy()
+        random.shuffle(current_times_pool)
+    return current_times_pool.pop()
+
+def get_next_food() -> str:
+    global current_foods_pool
+    if not current_foods_pool:
+        current_foods_pool = FOODS_LIST.copy()
+        random.shuffle(current_foods_pool)
+    return current_foods_pool.pop()
+
+async def apply_delayed_reaction(chat_id: int, message_id: int):
+    delay = get_next_time()
+    emoji = get_next_emoji()
+    await asyncio.sleep(delay)
+    try:
+        await bot.set_message_reaction(
+            chat_id=chat_id,
+            message_id=message_id,
+            reaction=[types.ReactionTypeEmoji(emoji=emoji)],
+            is_big=False
+        )
+    except Exception:
+        pass
 
 def get_next_keyboard() -> InlineKeyboardMarkup:
-    global current_button_index
+    global sequence_index
     
-    btn_info = BUTTONS_CONFIG[current_button_index]
+    flow = [0, 1, 2, 1]
+    current_btn_config_idx = flow[sequence_index]
     
-    if btn_info["text"] == "انضموا":
-        current_button_index = 1
-    elif btn_info["text"] == "سلوى":
-        current_button_index = 0
-    elif btn_info["text"] == "المطور":
-        current_button_index = 2
+    btn_info = BUTTONS_CONFIG[current_btn_config_idx]
+    sequence_index = (sequence_index + 1) % len(flow)
         
     button = InlineKeyboardButton(
         text=btn_info["text"],
@@ -73,11 +115,12 @@ EXCLUDE_RX = re.compile(r'https?://(www\.)?(youtube\.com|youtu\.be|t\.me|telegra
 async def send_startup_notification():
     for admin_id in ADMIN_IDS:
         try:
-            await bot.send_message(
+            msg = await bot.send_message(
                 chat_id=admin_id, 
                 text=STARTUP_MESSAGE, 
                 reply_markup=get_next_keyboard()
             )
+            asyncio.create_task(apply_delayed_reaction(msg.chat.id, msg.message_id))
         except Exception:
             pass
 
@@ -95,21 +138,37 @@ async def download_and_send(message: Message, url: str, user_id: int):
         try:
             if isinstance(cached_data, list):
                 for media_group in cached_data:
-                    await message.reply_media_group(media=media_group)
+                    sent_group = await message.reply_media_group(media=media_group)
+                    for m in sent_group:
+                        asyncio.create_task(apply_delayed_reaction(m.chat.id, m.message_id))
+                last_msg = await message.reply(ALBUM_SUCCESS_MESSAGE, reply_markup=get_next_keyboard())
+                asyncio.create_task(apply_delayed_reaction(last_msg.chat.id, last_msg.message_id))
             else:
-                await message.reply_document(
+                sent_doc = await message.reply_document(
                     document=cached_data['file_id'], 
                     reply_markup=get_next_keyboard()
                 )
+                asyncio.create_task(apply_delayed_reaction(sent_doc.chat.id, sent_doc.message_id))
             return
         except Exception:
             if url in file_id_cache:
                 del file_id_cache[url]
 
     status = await message.reply("يتم تنفيذ طلبك تاج راسي العظيم تدلل\nراح يوصل هسا", reply_markup=get_next_keyboard())
+    asyncio.create_task(apply_delayed_reaction(status.chat.id, status.message_id))
+    
+    try:
+        food_reply = await bot.send_message(
+            chat_id=status.chat.id,
+            text=get_next_food(),
+            reply_to_message_id=status.message_id
+        )
+        asyncio.create_task(apply_delayed_reaction(food_reply.chat.id, food_reply.message_id))
+    except Exception:
+        pass
+        
     loop = asyncio.get_running_loop()
     temp_dir_to_clean = None
-    
     last_update_time = loop.time()
 
     def smart_progress_hook(d):
@@ -128,7 +187,6 @@ async def download_and_send(message: Message, url: str, user_id: int):
             opts = {
                 'quiet': True, 
                 'no_warnings': True,
-                'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
                 'extract_flat': 'in_playlist'
             }
             with yt_dlp.YoutubeDL(opts) as ydl:
@@ -146,7 +204,6 @@ async def download_and_send(message: Message, url: str, user_id: int):
             opts = {
                 'format': 'bestvideo+bestaudio/best',
                 'quiet': True,
-                'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
                 'outtmpl': str(p / '%%(autonumber)03d_%%(id)s.%%(ext)s'), 
                 'max_filesize': MAX_SIZE_BYTES,
                 'progress_hooks': [smart_progress_hook],
@@ -222,15 +279,19 @@ async def download_and_send(message: Message, url: str, user_id: int):
         
         if len(media_results) == 1:
             res = media_results[0]
-            sent_doc = await message.reply_document(
-                document=types.FSInputFile(path=res['path'], filename=res['name']),
+            sent_doc = await status.edit_media(
+                media=types.InputMediaDocument(
+                    media=types.FSInputFile(path=res['path'], filename=res['name'])
+                ),
                 reply_markup=get_next_keyboard()
             )
+            asyncio.create_task(apply_delayed_reaction(sent_doc.chat.id, sent_doc.message_id))
             file_id_cache[url] = {
                 'file_id': sent_doc.document.file_id,
                 'filename': res['name']
             }
         else:
+            await status.delete()
             chunks = [media_results[i:i + 8] for i in range(0, len(media_results), 8)]
             for chunk in chunks:
                 media_group = []
@@ -247,17 +308,20 @@ async def download_and_send(message: Message, url: str, user_id: int):
                 
                 if media_group:
                     sent_group = await message.reply_media_group(media=media_group)
+                    for m in sent_group:
+                        asyncio.create_task(apply_delayed_reaction(m.chat.id, m.message_id))
                     group_ids = [m.photo[-1].file_id if m.photo else m.video.file_id for m in sent_group]
                     album_cache_data.append(group_ids)
             
+            last_msg = await message.reply(ALBUM_SUCCESS_MESSAGE, reply_markup=get_next_keyboard())
+            asyncio.create_task(apply_delayed_reaction(last_msg.chat.id, last_msg.message_id))
             if album_cache_data:
                 file_id_cache[url] = album_cache_data
-                
-        await status.delete()
 
     except Exception:
         try:
-            await status.edit_text(ERROR_MESSAGE, reply_markup=get_next_keyboard())
+            err_msg = await status.edit_text(ERROR_MESSAGE, reply_markup=get_next_keyboard())
+            asyncio.create_task(apply_delayed_reaction(err_msg.chat.id, err_msg.message_id))
         except Exception:
             pass
     finally:
@@ -301,12 +365,32 @@ async def enqueue_request(message: Message, url: str):
     else:
         return
 
+async def send_user_welcome_msg(message: Message):
+    uid = message.from_user.id if message.from_user else message.chat.id
+    idx = user_tracker.get(uid, 0)
+    rep_msg = await message.reply(WELCOME_MSGS[idx], reply_markup=get_next_keyboard())
+    asyncio.create_task(apply_delayed_reaction(rep_msg.chat.id, rep_msg.message_id))
+    user_tracker[uid] = (idx + 1) % len(WELCOME_MSGS)
+    
+    try:
+        food_reply = await bot.send_message(
+            chat_id=rep_msg.chat.id,
+            text=get_next_food(),
+            reply_to_message_id=rep_msg.message_id
+        )
+        asyncio.create_task(apply_delayed_reaction(food_reply.chat.id, food_reply.message_id))
+    except Exception:
+        pass
+
 @dp.message(F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}))
 async def handle_group_message(message: Message):
     text = message.text or message.caption or ""
     m = URL_RX.search(text)
     if m and not EXCLUDE_RX.search(m.group(0)):
         asyncio.create_task(enqueue_request(message, m.group(0)))
+    elif "بوت" in text:
+        asyncio.create_task(apply_delayed_reaction(message.chat.id, message.message_id))
+        await send_user_welcome_msg(message)
 
 @dp.channel_post()
 async def handle_channel_post(message: Message):
@@ -314,19 +398,20 @@ async def handle_channel_post(message: Message):
     m = URL_RX.search(text)
     if m and not EXCLUDE_RX.search(m.group(0)):
         asyncio.create_task(enqueue_request(message, m.group(0)))
+    elif "بوت" in text:
+        asyncio.create_task(apply_delayed_reaction(message.chat.id, message.message_id))
+        await send_user_welcome_msg(message)
 
 @dp.message(F.chat.type == ChatType.PRIVATE)
 async def handle_private(message: Message):
+    asyncio.create_task(apply_delayed_reaction(message.chat.id, message.message_id))
     text = message.text or ""
     m = URL_RX.search(text)
     
     if m and not EXCLUDE_RX.search(m.group(0)):
         asyncio.create_task(enqueue_request(message, m.group(0)))
     else:
-        uid = message.from_user.id
-        idx = user_tracker.get(uid, 0)
-        await message.reply(WELCOME_MSGS[idx], reply_markup=get_next_keyboard())
-        user_tracker[uid] = (idx + 1) % len(WELCOME_MSGS)
+        await send_user_welcome_msg(message)
 
 async def main():
     await send_startup_notification()
