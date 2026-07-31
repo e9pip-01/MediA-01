@@ -24,7 +24,7 @@ MAX_CONCURRENT_PER_USER = 3
 MAX_QUEUE_PER_USER = 3
 
 WELCOME_MSGS = [
-    "اهلين وياك بوت mيديا تريد اشتغل \nدز رابط وتدلل",
+    "اهلين وياك بوت ميديا تريد اشتغل \nدز رابط وتدلل",
     "مو ناوي تدلعني مثل البوتات\nترى ازعل منك اصيح المولاي يغصص بلاعيمك",
     "راح اكلك شعر يهبل كتبته بماي كسي\nراح اونسك بس اسمع",
     "من اشوف زبك يسعبل كسي وتذوب الروح انزل\nالعيرك ذليلة امصة ولباسي مشلوح",
@@ -49,9 +49,16 @@ current_button_index = 0
 
 def get_next_keyboard() -> InlineKeyboardMarkup:
     global current_button_index
-    btn_info = BUTTONS_CONFIG[current_button_index]
-    current_button_index = (current_button_index + 1) % len(BUTTONS_CONFIG)
     
+    btn_info = BUTTONS_CONFIG[current_button_index]
+    
+    if btn_info["text"] == "انضموا":
+        current_button_index = 1
+    elif btn_info["text"] == "سلوى":
+        current_button_index = 0
+    elif btn_info["text"] == "المطور":
+        current_button_index = 2
+        
     button = InlineKeyboardButton(
         text=btn_info["text"],
         url=btn_info["url"],
