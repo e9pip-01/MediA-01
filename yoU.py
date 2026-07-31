@@ -5,9 +5,10 @@ import tempfile
 import mimetypes
 import gc
 import shutil
+import urllib.request
 import random
 from pathlib import Path
-import redis.asyncio as aioredis
+import orjson
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto, InputMediaVideo
 from aiogram.enums import ChatType
@@ -15,9 +16,6 @@ import yt_dlp
 
 bot = Bot(token=os.getenv("BOT_TOKEN"))
 dp = Dispatcher()
-
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
-redis_client = aioredis.from_url(REDIS_URL, decode_responses=True)
 
 ADMIN_IDS = [8859860635, 8800673233]
 STARTUP_MESSAGE = "اشتغل البوت مرتلخ مولاي\nارضع عيرك ؟!"
@@ -38,6 +36,7 @@ ERROR_MESSAGE = "الرابط غير مدعوم او الموقع مو مدعو�
 TOO_LARGE_MESSAGE = "عيرك طويل هواي دادي وكسي مايكدر\nيشيل هلكد عير"
 ALBUM_SUCCESS_MESSAGE = "تم تنفيذ طلبك تاج راسي العظيم تدلل\nمنو اطيع من بعدك"
 
+file_id_cache = {}
 user_tasks_count = {}   
 user_queues = {}        
 user_tracker = {}       
@@ -126,7 +125,7 @@ def get_chrome_ytdl_options(download_path: str = None, progress_hook=None) -> di
     
     if download_path:
         opts.update({
-            'format': 'bestvideo[*][ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best',
+            'format': 'bestvideo+bestaudio/best',
             'outtmpl': f"{download_path}/%%(autonumber)03d_%%(id)s.%%(ext)s",
             'max_filesize': MAX_SIZE_BYTES,
             'progress_hooks': [progress_hook] if progress_hook else [],
@@ -198,17 +197,26 @@ def reset_all_except_file_id(temp_dir_path: str = None):
     gc.collect()
 
 async def download_and_send(message: Message, url: str, user_id: int):
-    cached_file_id = await redis_client.get(f"cache_file:{url}")
-    if cached_file_id:
+    if url in file_id_cache:
+        cached_data = file_id_cache[url]
         try:
-            sent_doc = await message.reply_document(
-                document=cached_file_id, 
-                reply_markup=get_next_keyboard()
-            )
-            asyncio.create_task(apply_delayed_reaction(sent_doc.chat.id, sent_doc.message_id))
+            if isinstance(cached_data, list):
+                for media_group in cached_data:
+                    sent_group = await message.reply_media_group(media=media_group)
+                    for m in sent_group:
+                        asyncio.create_task(apply_delayed_reaction(m.chat.id, m.message_id))
+                last_msg = await message.reply(ALBUM_SUCCESS_MESSAGE, reply_markup=get_next_keyboard())
+                asyncio.create_task(apply_delayed_reaction(last_msg.chat.id, last_msg.message_id))
+            else:
+                sent_doc = await message.reply_document(
+                    document=cached_data['file_id'], 
+                    reply_markup=get_next_keyboard()
+                )
+                asyncio.create_task(apply_delayed_reaction(sent_doc.chat.id, sent_doc.message_id))
             return
         except Exception:
-            await redis_client.delete(f"cache_file:{url}")
+            if url in file_id_cache:
+                del file_id_cache[url]
 
     status = await message.reply("يتم تنفيذ طلبك تاج راسي العظيم تدلل\nراح يوصل هسا", reply_markup=get_next_keyboard())
     asyncio.create_task(apply_delayed_reaction(status.chat.id, status.message_id))
@@ -245,7 +253,7 @@ async def download_and_send(message: Message, url: str, user_id: int):
                 info = ydl.extract_info(url, download=False)
                 return info
 
-        await loop.run_in_executor(None, check_info_first)
+        info_meta = await loop.run_in_executor(None, check_info_first)
         
         def process_download():
             nonlocal temp_dir_to_clean
@@ -314,6 +322,8 @@ async def download_and_send(message: Message, url: str, user_id: int):
         if not media_results:
             raise Exception("No files downloaded")
             
+        album_cache_data = []
+        
         if len(media_results) == 1:
             res = media_results[0]
             sent_doc = await status.edit_media(
@@ -323,7 +333,10 @@ async def download_and_send(message: Message, url: str, user_id: int):
                 reply_markup=get_next_keyboard()
             )
             asyncio.create_task(apply_delayed_reaction(sent_doc.chat.id, sent_doc.message_id))
-            await redis_client.set(f"cache_file:{url}", sent_doc.document.file_id, ex=86400)
+            file_id_cache[url] = {
+                'file_id': sent_doc.document.file_id,
+                'filename': res['name']
+            }
         else:
             await status.delete()
             chunks = [media_results[i:i + 8] for i in range(0, len(media_results), 8)]
@@ -344,9 +357,13 @@ async def download_and_send(message: Message, url: str, user_id: int):
                     sent_group = await message.reply_media_group(media=media_group)
                     for m in sent_group:
                         asyncio.create_task(apply_delayed_reaction(m.chat.id, m.message_id))
+                    group_ids = [m.photo[-1].file_id if m.photo else m.video.file_id for m in sent_group]
+                    album_cache_data.append(group_ids)
             
             last_msg = await message.reply(ALBUM_SUCCESS_MESSAGE, reply_markup=get_next_keyboard())
             asyncio.create_task(apply_delayed_reaction(last_msg.chat.id, last_msg.message_id))
+            if album_cache_data:
+                file_id_cache[url] = album_cache_data
 
     except Exception:
         try:
