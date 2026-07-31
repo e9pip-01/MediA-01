@@ -1,40 +1,22 @@
-import os
-import re
-import asyncio
-import mimetypes
-import shutil
-import deep_translator
-from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.enums import ParseMode
-from aiogram.exceptions import TelegramBadRequest
-from aiogram.client.default import DefaultBotProperties
-import yt_dlp
+import os, re, asyncio, tempfile, mimetypes, gc, shutil
+from pathlib import Path
 import orjson
-import redis.asyncio as aioredis
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.types import Message
+from aiogram.enums import ChatType
+import yt_dlp
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "8859860635"))
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
-MAX_FILE_SIZE = 456 * 1024 * 1024
-
-redis_client = aioredis.from_url(REDIS_URL, decode_responses=True)
-
-bot = Bot(token=BOT_TOKEN)
+bot = Bot(token=os.getenv("BOT_TOKEN"))
 dp = Dispatcher()
 
-download_semaphore = asyncio.Semaphore(3)
-active_downloads = 0
-waiting_count = 0
+ADMIN_IDS = [8859860635, 8800673233]
+STARTUP_MESSAGE = "اشتغل البوت مرتلخ مولاي\nارضع عيرك ؟!"
 
-user_reply_counters = {}
-btn_color_index = 0
-BUTTON_STYLES = ["primary", "success", "danger"]
+MAX_SIZE_BYTES = 456 * 1024 * 1024
+MAX_CONCURRENT_PER_USER = 3
+MAX_QUEUE_PER_USER = 3
 
-UPPER_ENG = set("ATFGNMUJL")
-UPPER_RUS = set("АБИ")
-
-WELCOME_RESPONSES = [
+WELCOME_MSGS = [
     "اهلين وياك بوت ميديا تريد اشتغل \nدز رابط وتدلل",
     "مو ناوي تدلعني مثل البوتات\nترى ازعل منك اصيح المولاي يغصص بلاعيمك",
     "راح اكلك شعر يهبل كتبته بماي كسي\nراح اونسك بس اسمع",
@@ -42,413 +24,207 @@ WELCOME_RESPONSES = [
     "انزع لباسي الك وتنيكني يبعد كل طموح شكني\nبعيرك وضرطني العافيه ترى فدوة الك اروح"
 ]
 
-MSG_SIZE_EXCEEDED = "عيرك طويل هواي دادي وكسي مايكدر\nيشيل هلكد عير طويل"
-MSG_UNSUPPORTED_LINK = "الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي"
+ERROR_MESSAGE = "الرابط غير مدعوم او الموقع مو مدعوم\nشم كسي ويصير مدعوم ههع امزح دادي"
+TOO_LARGE_MESSAGE = "عيرك طويل هواي دادي وكسي مايكدر\nيشيل هلكد عير"
 
-def get_admin_inline_keyboard():
-    global btn_color_index
-    current_style = BUTTON_STYLES[btn_color_index]
-    btn_color_index = (btn_color_index + 1) % len(BUTTON_STYLES)
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="ملكوت عيري", url=f"tg://user?id={ADMIN_ID}", style=current_style)
-            ]
-        ]
-    )
+file_id_cache = {}
+user_tasks_count = {}   
+user_queues = {}        
+user_tracker = {}       
 
-def get_document_keyboard():
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="ملكوت كسي", url=f"tg://user?id={ADMIN_ID}", style="danger")
-            ]
-        ]
-    )
+UPPER_MAP = {'a':'A','t':'T','n':'N','m':'M','g':'G','u':'U','f':'F','j':'J','а':'А','и':'И','б':'Б'}
+URL_RX = re.compile(r'https?://[^\s]+')
+EXCLUDE_RX = re.compile(r'https?://(www\.)?(youtube\.com|youtu\.be|t\.me|telegram\.me|telegram\.dog)/', re.I)
 
-async def get_user_settings(user_id: int):
-    data = await redis_client.get(f"user_settings:{user_id}")
-    if data:
-        return orjson.loads(data)
-    return {"lang_mode": False, "target_lang": "eNG"}
+async def send_startup_notification():
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(chat_id=admin_id, text=STARTUP_MESSAGE)
+        except Exception:
+            pass
 
-async def set_user_settings(user_id: int, settings: dict):
-    await redis_client.set(f"user_settings:{user_id}", orjson.dumps(settings))
+def reset_all_except_file_id(temp_dir_path: str = None):
+    if temp_dir_path and os.path.exists(temp_dir_path):
+        try:
+            shutil.rmtree(temp_dir_path, ignore_errors=True)
+        except Exception:
+            pass
+    gc.collect()
 
-def is_english(char):
-    return 'a' <= char.lower() <= 'z'
-
-def is_russian(char):
-    return ('а' <= char.lower() <= 'я') or char.lower() == 'ё'
-
-def transform_publisher_name(name):
-    res = []
-    for char in name:
-        if is_english(char):
-            ch_upper = char.upper()
-            res.append(ch_upper if ch_upper in UPPER_ENG else char.lower())
-        elif is_russian(char):
-            ch_upper = char.upper()
-            res.append(ch_upper if ch_upper in UPPER_RUS else char.lower())
-        else:
-            res.append(char)
-    return "".join(res)
-
-def clean_publisher(name):
-    if not name:
-        return ""
-    transformed = transform_publisher_name(name)
-    cleaned = re.sub(r'[^a-zA-Z0-9\s_а-яА-ЯёЁ]', '', transformed)
-    return cleaned.strip()
-
-def clean_title(title):
-    if not title:
-        return "Media"
-    cleaned = re.sub(r'[^a-zA-Z0-9\s\-&а-яА-ЯёЁ]', '', title)
-    return cleaned.strip()
-
-def transform_general_text(text):
-    res = []
-    for char in text:
-        if is_english(char):
-            ch_upper = char.upper()
-            res.append(ch_upper if ch_upper in UPPER_ENG else char.lower())
-        elif is_russian(char):
-            ch_upper = char.upper()
-            res.append(ch_upper if ch_upper in UPPER_RUS else char.lower())
-        else:
-            res.append(char)
-    return "".join(res)
-
-def is_pure_arabic(text):
-    stripped = re.sub(r'[\s\d\W_]', '', text)
-    if not stripped:
-        return False
-    return bool(re.fullmatch(r'[\u0600-\u06FF]+', stripped))
-
-def is_url(text):
-    url_pattern = re.compile(
-        r'^(?:http|ftp)s?://'
-        r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+(?:[A-Z]{2,6}\.?|[A-Z0-9-]{2,}\.?)|'
-        r'localhost|'
-        r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'
-        r'(?::\d+)?'
-        r'(?:/?|[/?]\S+)$', re.IGNORECASE
-    )
-    return bool(url_pattern.match(text.strip()))
-
-def is_youtube_or_telegram(text):
-    yt_tg_pattern = re.compile(
-        r'(https?://)?(www\.)?(youtube\.com|youtu\.be|t\.me|telegram\.me)/.*', re.IGNORECASE
-    )
-    return bool(yt_tg_pattern.search(text.strip()))
-
-async def get_settings_keyboard(user_id: int):
-    settings = await get_user_settings(user_id)
-    lang_active = settings["lang_mode"]
-    curr_lang = settings["target_lang"]
-
-    lang_btn_style = "success" if lang_active else "primary"
-
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text=curr_lang, callback_data="toggle_target_lang"),
-                InlineKeyboardButton(text="وضع اللغات", callback_data="toggle_lang_mode", style=lang_btn_style)
-            ],
-            [
-                InlineKeyboardButton(text="الغاء", callback_data="close_settings", style="primary")
-            ]
-        ]
-    )
-
-async def send_delayed_reply(message: Message, text: str):
-    sent_msg = await message.reply(text)
-    await asyncio.sleep(0.3)
-    try:
-        await sent_msg.edit_reply_markup(reply_markup=get_admin_inline_keyboard())
-    except Exception:
-        pass
-
-@dp.message(F.text.func(lambda text: text and text.strip() == "ادت"))
-async def handle_edit_cmd(message: Message):
-    user_id = message.from_user.id
-    kb = await get_settings_keyboard(user_id)
-    text = "تريد تغير لغة وضع اللغات دوس ع الزر الفوك يسار\nتريد تفعل وضع اللغات دوس ع الزر الفوك يمين"
-    await message.reply(text, reply_markup=kb)
-
-@dp.callback_query(F.data == "toggle_lang_mode")
-async def process_toggle_lang_mode(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    settings = await get_user_settings(user_id)
-    
-    settings["lang_mode"] = not settings["lang_mode"]
-    await set_user_settings(user_id, settings)
-
-    kb = await get_settings_keyboard(user_id)
-    try:
-        await callback.message.edit_reply_markup(reply_markup=kb)
-    except Exception:
-        pass
-
-    if settings["lang_mode"]:
-        alert_text = "تم تفعيل وضع اللغات\nالوضع ✅"
-    else:
-        alert_text = "تم تعطيل وضع اللغات\nالوضع ❌"
-
-    await callback.answer(text=alert_text, show_alert=True)
-
-@dp.callback_query(F.data == "toggle_target_lang")
-async def process_toggle_target_lang(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    settings = await get_user_settings(user_id)
-
-    settings["target_lang"] = "rUS" if settings["target_lang"] == "eNG" else "eNG"
-    await set_user_settings(user_id, settings)
-
-    kb = await get_settings_keyboard(user_id)
-    try:
-        await callback.message.edit_reply_markup(reply_markup=kb)
-    except Exception:
-        pass
-    await callback.answer()
-
-@dp.callback_query(F.data == "close_settings")
-async def process_close_settings(callback: CallbackQuery):
-    try:
-        if callback.message.reply_to_message:
-            await callback.message.reply_to_message.delete()
-    except Exception:
-        pass
-
-    try:
-        await callback.message.delete()
-    except Exception:
-        pass
-    await callback.answer()
-
-async def process_download_task(message: Message, url: str):
-    global active_downloads, waiting_count
-    
-    cached_file_id = await redis_client.get(f"file_id:{url}")
-    if cached_file_id:
+async def download_and_send(message: Message, url: str, user_id: int):
+    if url in file_id_cache:
+        cached_data = file_id_cache[url]
         try:
             await message.reply_document(
-                document=cached_file_id,
-                reply_markup=get_document_keyboard()
+                document=cached_data['file_id'], 
+                caption=f"{cached_data['filename']}"
             )
             return
         except Exception:
-            pass
+            del file_id_cache[url]
 
-    status_msg = await message.reply("دانفذ طلبك انتظر مولاي ماراح اضل هواي\nامص عيرك ءعهقءعهقءعهق امم؟!  0%")
-    await asyncio.sleep(0.3)
+    status = await message.reply("يتم تنفيذ طلبك تاج راسي العظيم تدلل\nراح يوصل هسا 0%")
+    loop = asyncio.get_running_loop()
+    temp_dir_to_clean = None
+    
+    last_step = 0
+
+    def smart_progress_hook(d):
+        nonlocal last_step
+        if d.get('status') == 'downloading':
+            total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
+            downloaded = d.get('downloaded_bytes', 0)
+            if total > 0:
+                percent = (downloaded / total) * 100
+                current_step = int(percent // 15)
+                
+                if current_step > last_step and current_step <= 6:
+                    last_step = current_step
+                    display_percent = min(current_step * 15, 100)
+                    msg_text = f"يتم تنفيذ طلبك تاج راسي العظيم تدلل\nراح يوصل هسا {display_percent}%"
+                    asyncio.run_coroutine_threadsafe(
+                        status.edit_text(msg_text), loop
+                    )
+
     try:
-        await status_msg.edit_reply_markup(reply_markup=get_admin_inline_keyboard())
-    except Exception:
-        pass
+        def check_info_first():
+            opts = {'quiet': True, 'no_warnings': True}
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                filesize = info.get('filesize') or info.get('filesize_approx') or 0
+                return filesize, info
 
-    user_dir = f"downloads/{message.from_user.id}_{message.message_id}"
-    os.makedirs(user_dir, exist_ok=True)
-
-    try:
-        ydl_info_opts = {
-            'quiet': True,
-            'no_warnings': True,
-        }
+        filesize, info_meta = await loop.run_in_executor(None, check_info_first)
         
-        loop = asyncio.get_running_loop()
-        try:
-            info = await loop.run_in_executor(None, lambda: yt_dlp.YoutubeDL(ydl_info_opts).extract_info(url, download=False))
-        except Exception:
-            await status_msg.edit_text(MSG_UNSUPPORTED_LINK)
-            await status_msg.edit_reply_markup(reply_markup=get_admin_inline_keyboard())
-            shutil.rmtree(user_dir, ignore_errors=True)
+        if filesize > MAX_SIZE_BYTES:
+            await status.edit_text(TOO_LARGE_MESSAGE)
             return
 
-        if not info:
-            await status_msg.edit_text(MSG_UNSUPPORTED_LINK)
-            await status_msg.edit_reply_markup(reply_markup=get_admin_inline_keyboard())
-            shutil.rmtree(user_dir, ignore_errors=True)
-            return
+        def process_download():
+            nonlocal temp_dir_to_clean
+            tmp_dir = tempfile.mkdtemp()
+            temp_dir_to_clean = tmp_dir
+            p = Path(tmp_dir)
+            
+            opts = {
+                'format': 'best',
+                'quiet': True,
+                'external_downloader': 'aria2c', 
+                'external_downloader_args': ['aria2c:', '-s', '16', '-x', '16', '-k', '1M'],
+                'outtmpl': str(p / '%(id)s.%(ext)s'), 
+                'max_filesize': MAX_SIZE_BYTES,
+                'progress_hooks': [smart_progress_hook]
+            }
+            
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                fpath = Path(ydl.prepare_filename(info))
+                
+                clean = lambda s: re.sub(r'\s+', ' ', re.sub(r'[^a-zA-Z0-9\u0600-\u06FF\u0400-\u04FF\s]', '', "".join(UPPER_MAP.get(c, c) for c in (s or "").lower()))).strip()
+                
+                mime = info.get('mime_type') or (info.get('requested_downloads', [{}])[0].get('mime_type') if info.get('requested_downloads') else None)
+                if not mime and fpath.exists(): 
+                    mime, _ = mimetypes.guess_type(str(fpath))
+                ext = (mimetypes.guess_extension(mime.split(';')[0].strip().lower()) or "").lstrip('.') if mime else info.get('ext', '')
+                
+                uploader = clean(info.get('uploader') or info.get('uploader_id')) or 'Uploader'
+                title = clean(info.get('title')) or 'Media'
+                name = f"[{uploader}] - [{title}]" + (f".{ext}" if ext else "")
+                
+                new_p = p / name
+                if fpath.exists(): 
+                    fpath.rename(new_p)
+                return new_p.read_bytes(), name
 
-        file_size = info.get('filesize') or info.get('filesize_approx') or 0
-        if file_size > MAX_FILE_SIZE:
-            await status_msg.edit_text(MSG_SIZE_EXCEEDED)
-            await status_msg.edit_reply_markup(reply_markup=get_admin_inline_keyboard())
-            shutil.rmtree(user_dir, ignore_errors=True)
-            return
-
-        publisher_raw = info.get('uploader') or info.get('channel') or ""
-        publisher_clean = clean_publisher(publisher_raw)
-        title_clean = clean_title(info.get('title', ''))
-
-        if publisher_clean:
-            final_base_name = f"{publisher_clean} - {title_clean}"
-        else:
-            final_base_name = title_clean
-
-        outtmpl_str = os.path.join(user_dir, f"{final_base_name}.%(ext)s")
-
-        last_percent = [-15]
-
-        def progress_hook(d):
-            if d['status'] == 'downloading':
-                total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
-                downloaded = d.get('downloaded_bytes', 0)
-                if total > 0:
-                    pct = int((downloaded / total) * 100)
-                    if pct >= last_percent[0] + 15:
-                        last_percent[0] = (pct // 15) * 15
-                        asyncio.run_coroutine_threadsafe(
-                            update_progress_ui(status_msg, last_percent[0]),
-                            loop
-                        )
-
-        ydl_opts = {
-            'outtmpl': outtmpl_str,
-            'progress_hooks': [progress_hook],
-            'quiet': True,
-            'no_warnings': True,
-            'format': 'bestvideo+bestaudio/best',
-        }
-
-        try:
-            await loop.run_in_executor(None, lambda: yt_dlp.YoutubeDL(ydl_opts).download([url]))
-        except Exception:
-            await status_msg.edit_text(MSG_UNSUPPORTED_LINK)
-            await status_msg.edit_reply_markup(reply_markup=get_admin_inline_keyboard())
-            shutil.rmtree(user_dir, ignore_errors=True)
-            return
-
-        downloaded_files = [os.path.join(user_dir, f) for f in os.listdir(user_dir)]
-        if not downloaded_files:
-            await status_msg.edit_text(MSG_UNSUPPORTED_LINK)
-            await status_msg.edit_reply_markup(reply_markup=get_admin_inline_keyboard())
-            shutil.rmtree(user_dir, ignore_errors=True)
-            return
-
-        file_path = downloaded_files[0]
-        actual_size = os.path.getsize(file_path)
-
-        if actual_size > MAX_FILE_SIZE:
-            await status_msg.edit_text(MSG_SIZE_EXCEEDED)
-            await status_msg.edit_reply_markup(reply_markup=get_admin_inline_keyboard())
-            shutil.rmtree(user_dir, ignore_errors=True)
-            return
-
-        mime_type, _ = mimetypes.guess_type(file_path)
-        if not mime_type:
-            mime_type = "application/octet-stream"
-
-        file_name = os.path.basename(file_path)
-
-        from aiogram.types import FSInputFile
-        input_file = FSInputFile(path=file_path, filename=file_name)
-
+        data, name = await loop.run_in_executor(None, process_download)
+        
         sent_doc = await message.reply_document(
-            document=input_file,
-            reply_markup=get_document_keyboard()
+            document=types.BufferedInputFile(data, filename=name),
+            caption=f"{name}"
         )
-
-        if sent_doc and sent_doc.document:
-            await redis_client.set(f"file_id:{url}", sent_doc.document.file_id)
-
-        try:
-            await status_msg.delete()
-        except Exception:
-            pass
+        
+        file_id_cache[url] = {
+            'file_id': sent_doc.document.file_id,
+            'filename': name
+        }
+        await status.delete()
 
     except Exception:
         try:
-            await status_msg.edit_text(MSG_UNSUPPORTED_LINK)
-            await status_msg.edit_reply_markup(reply_markup=get_admin_inline_keyboard())
+            await status.edit_text(ERROR_MESSAGE)
         except Exception:
             pass
     finally:
-        shutil.rmtree(user_dir, ignore_errors=True)
+        reset_all_except_file_id(temp_dir_to_clean)
 
-async def update_progress_ui(msg: Message, pct: int):
-    try:
-        await msg.edit_text(f"دانفذ طلبك انتظر مولاي ماراح اضل هواي\nامص عيرك ءعهقءعهقءعهق امم؟!  {pct}%")
-        await msg.edit_reply_markup(reply_markup=get_admin_inline_keyboard())
-    except Exception:
-        pass
-
-@dp.message(F.text)
-async def handle_all_messages(message: Message):
-    global active_downloads, waiting_count
-
-    text = message.text.strip()
-    
-    if text == "ادت":
-        return
-
-    user_id = message.from_user.id
-    is_link = is_url(text)
-    is_yt_tg = is_youtube_or_telegram(text)
-
-    if is_link and not is_yt_tg:
-        if active_downloads + waiting_count >= 6:
-            return
-
-        if active_downloads >= 3:
-            waiting_count += 1
-            async with download_semaphore:
-                waiting_count -= 1
-                active_downloads += 1
-                try:
-                    await process_download_task(message, text)
-                finally:
-                    active_downloads -= 1
-        else:
-            async with download_semaphore:
-                active_downloads += 1
-                try:
-                    await process_download_task(message, text)
-                finally:
-                    active_downloads -= 1
-        return
-
-    settings = await get_user_settings(user_id)
-
-    if settings["lang_mode"]:
-        if is_pure_arabic(text):
-            target_code = "en" if settings["target_lang"] == "eNG" else "ru"
+async def process_user_queue(user_id: int):
+    while True:
+        queue = user_queues.get(user_id)
+        if not queue or queue.empty():
+            break
+            
+        if user_tasks_count.get(user_id, 0) < MAX_CONCURRENT_PER_USER:
+            user_tasks_count[user_id] = user_tasks_count.get(user_id, 0) + 1
+            msg, url = await queue.get()
             try:
-                translated = deep_translator.GoogleTranslator(source='auto', target=target_code).translate(text)
-                await send_delayed_reply(message, translated)
-            except Exception:
-                await send_delayed_reply(message, text)
-            return
+                await download_and_send(msg, url, user_id)
+            finally:
+                user_tasks_count[user_id] = max(0, user_tasks_count.get(user_id, 1) - 1)
+                queue.task_done()
+        else:
+            break
 
-    has_eng = any(is_english(c) for c in text)
-    has_rus = any(is_russian(c) for c in text)
-    has_arabic = any('\u0600' <= c <= '\u06FF' for c in text)
+async def enqueue_request(message: Message, url: str):
+    user_id = message.from_user.id if message.from_user else message.chat.id
 
-    if (has_eng or has_rus) and not has_arabic:
-        transformed = transform_general_text(text)
-        await send_delayed_reply(message, transformed)
+    if user_id not in user_queues:
+        user_queues[user_id] = asyncio.Queue()
+
+    q = user_queues[user_id]
+    current_active = user_tasks_count.get(user_id, 0)
+
+    if current_active < MAX_CONCURRENT_PER_USER:
+        user_tasks_count[user_id] = current_active + 1
+        try:
+            await download_and_send(message, url, user_id)
+        finally:
+            user_tasks_count[user_id] = max(0, user_tasks_count.get(user_id, 1) - 1)
+            asyncio.create_task(process_user_queue(user_id))
+
+    elif q.qsize() < MAX_QUEUE_PER_USER:
+        await q.put((message, url))
+    else:
         return
 
-    idx = user_reply_counters.get(user_id, 0)
-    response_text = WELCOME_RESPONSES[idx]
-    user_reply_counters[user_id] = (idx + 1) % len(WELCOME_RESPONSES)
+@dp.message(F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}))
+async def handle_group_message(message: Message):
+    text = message.text or message.caption or ""
+    m = URL_RX.search(text)
+    if m and not EXCLUDE_RX.search(m.group(0)):
+        asyncio.create_task(enqueue_request(message, text.strip()))
 
-    await send_delayed_reply(message, response_text)
+@dp.channel_post()
+async def handle_channel_post(message: Message):
+    text = message.text or message.caption or ""
+    m = URL_RX.search(text)
+    if m and not EXCLUDE_RX.search(m.group(0)):
+        asyncio.create_task(enqueue_request(message, text.strip()))
 
-async def on_startup(bot: Bot):
-    try:
-        await bot.send_message(
-            chat_id=ADMIN_ID,
-            text="اشتغل البوت مرتلخ مولاي\nارضع عيرك ؟!",
-            reply_markup=get_admin_inline_keyboard()
-        )
-    except Exception:
-        pass
+@dp.message(F.chat.type == ChatType.PRIVATE)
+async def handle_private(message: Message):
+    text = message.text or ""
+    m = URL_RX.search(text)
+    
+    if m and not EXCLUDE_RX.search(m.group(0)):
+        asyncio.create_task(enqueue_request(message, text.strip()))
+    else:
+        uid = message.from_user.id
+        idx = user_tracker.get(uid, 0)
+        await message.reply(WELCOME_MSGS[idx])
+        user_tracker[uid] = (idx + 1) % len(WELCOME_MSGS)
 
 async def main():
-    dp.startup.register(on_startup)
+    await send_startup_notification()
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
