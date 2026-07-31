@@ -1,4 +1,11 @@
-import os, re, asyncio, tempfile, mimetypes, gc, shutil
+import os
+import re
+import asyncio
+import tempfile
+import mimetypes
+import gc
+import shutil
+import urllib.request
 from pathlib import Path
 import orjson
 from aiogram import Bot, Dispatcher, types, F
@@ -17,7 +24,7 @@ MAX_CONCURRENT_PER_USER = 3
 MAX_QUEUE_PER_USER = 3
 
 WELCOME_MSGS = [
-    "اهلين وياك بوت ميديا تريد اشتغل \nدز رابط وتدلل",
+    "اهلين وياك بوت mيديا تريد اشتغل \nدز رابط وتدلل",
     "مو ناوي تدلعني مثل البوتات\nترى ازعل منك اصيح المولاي يغصص بلاعيمك",
     "راح اكلك شعر يهبل كتبته بماي كسي\nراح اونسك بس اسمع",
     "من اشوف زبك يسعبل كسي وتذوب الروح انزل\nالعيرك ذليلة امصة ولباسي مشلوح",
@@ -31,20 +38,6 @@ file_id_cache = {}
 user_tasks_count = {}   
 user_queues = {}        
 user_tracker = {}       
-
-HTTP_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-    'Accept-Language': 'ar-EG,ar;q=0.9,en-US;q=0.8,en;q=0.7',
-    'Sec-Ch-Ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
-    'Sec-Ch-Ua-Mobile': '?0',
-    'Sec-Ch-Ua-Platform': '"Windows"',
-    'Sec-Fetch-Dest': 'document',
-    'Sec-Fetch-Mode': 'navigate',
-    'Sec-Fetch-Site': 'none',
-    'Sec-Fetch-User': '?1',
-    'Upgrade-Insecure-Requests': '1'
-}
 
 BUTTONS_CONFIG = [
     {"text": "المطور", "url": "tg://user?id=8859860635", "style": "danger"},
@@ -102,35 +95,29 @@ async def download_and_send(message: Message, url: str, user_id: int):
         except Exception:
             del file_id_cache[url]
 
-    status = await message.reply("يتم تنفيذ طلبك تاج راسي العظيم تدلل\nراح يوصل هسا 0", reply_markup=get_next_keyboard())
+    status = await message.reply("يتم تنفيذ طلبك تاج راسي العظيم تدلل\nراح يوصل هسا", reply_markup=get_next_keyboard())
     loop = asyncio.get_running_loop()
     temp_dir_to_clean = None
     
-    last_step = 0
+    last_update_time = loop.time()
 
     def smart_progress_hook(d):
-        nonlocal last_step
+        nonlocal last_update_time
         if d.get('status') == 'downloading':
-            total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
-            downloaded = d.get('downloaded_bytes', 0)
-            if total > 0:
-                percent = (downloaded / total) * 100
-                current_step = int(percent // 15)
-                
-                if current_step > last_step and current_step <= 6:
-                    last_step = current_step
-                    display_percent = min(current_step * 15, 100)
-                    msg_text = f"يتم تنفيذ طلبك تاج راسي العظيم تدلل\nراح يوصل هسا {display_percent}"
-                    asyncio.run_coroutine_threadsafe(
-                        status.edit_text(msg_text, reply_markup=get_next_keyboard()), loop
-                    )
+            current_time = loop.time()
+            if current_time - last_update_time >= 5.0:
+                last_update_time = current_time
+                msg_text = "يتم تنفيذ طلبك تاج راسي العظيم تدلل\nراح يوصل هسا"
+                asyncio.run_coroutine_threadsafe(
+                    status.edit_text(msg_text, reply_markup=get_next_keyboard()), loop
+                )
 
     try:
         def check_info_first():
             opts = {
                 'quiet': True, 
                 'no_warnings': True,
-                'http_headers': HTTP_HEADERS
+                'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
             }
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=False)
@@ -150,14 +137,19 @@ async def download_and_send(message: Message, url: str, user_id: int):
             p = Path(tmp_dir)
             
             opts = {
-                'format': 'best',
+                'format': 'bestvideo+bestaudio/best',
                 'quiet': True,
-                'http_headers': HTTP_HEADERS,
-                'external_downloader': 'aria2c', 
-                'external_downloader_args': ['aria2c:', '-s', '16', '-x', '16', '-k', '1M', '--header=User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'],
-                'outtmpl': str(p / '%(id)s.%(ext)s'), 
+                'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'outtmpl': str(p / '%%(id)s.%%(ext)s'), 
                 'max_filesize': MAX_SIZE_BYTES,
-                'progress_hooks': [smart_progress_hook]
+                'progress_hooks': [smart_progress_hook],
+                'embedsubtitles': True,
+                'writesubtitles': True,
+                'writeautomaticsub': True,
+                'subtitleslangs': ['ar'],
+                'postprocessor_args': {
+                    'merger': ['-c:v', 'copy', '-c:a', 'copy', '-c:s', 'copy', '-map', '0']
+                }
             }
             
             with yt_dlp.YoutubeDL(opts) as ydl:
@@ -170,6 +162,8 @@ async def download_and_send(message: Message, url: str, user_id: int):
                 if not mime and fpath.exists(): 
                     mime, _ = mimetypes.guess_type(str(fpath))
                 ext = (mimetypes.guess_extension(mime.split(';')[0].strip().lower()) or "").lstrip('.') if mime else info.get('ext', '')
+                if not ext and fpath.exists():
+                    ext = fpath.suffix.lstrip('.')
                 
                 uploader = clean(info.get('uploader') or info.get('uploader_id')) or 'Uploader'
                 title = clean(info.get('title')) or 'Media'
@@ -178,12 +172,29 @@ async def download_and_send(message: Message, url: str, user_id: int):
                 new_p = p / name
                 if fpath.exists(): 
                     fpath.rename(new_p)
-                return new_p.read_bytes(), name
+                
+                thumb_url = info.get('thumbnail')
+                thumb_path = None
+                if thumb_url:
+                    try:
+                        t_path = p / "thumb.jpg"
+                        req = urllib.request.Request(thumb_url, headers={'User-Agent': 'Mozilla/5.0'})
+                        with urllib.request.urlopen(req) as response, open(t_path, 'wb') as out_file:
+                            out_file.write(response.read())
+                        if t_path.exists():
+                            thumb_path = str(t_path)
+                    except Exception:
+                        thumb_path = None
+                        
+                return str(new_p), name, thumb_path
 
-        data, name = await loop.run_in_executor(None, process_download)
+        file_path, name, thumb_file_path = await loop.run_in_executor(None, process_download)
+        
+        tg_thumb = types.FSInputFile(thumb_file_path) if thumb_file_path else None
         
         sent_doc = await message.reply_document(
-            document=types.BufferedInputFile(data, filename=name),
+            document=types.FSInputFile(path=file_path, filename=name),
+            thumbnail=tg_thumb,
             caption=f"{name}",
             reply_markup=get_next_keyboard()
         )
@@ -217,7 +228,7 @@ async def process_user_queue(user_id: int):
                 user_tasks_count[user_id] = max(0, user_tasks_count.get(user_id, 1) - 1)
                 queue.task_done()
         else:
-            break
+            await asyncio.sleep(1)
 
 async def enqueue_request(message: Message, url: str):
     user_id = message.from_user.id if message.from_user else message.chat.id
@@ -235,7 +246,6 @@ async def enqueue_request(message: Message, url: str):
         finally:
             user_tasks_count[user_id] = max(0, user_tasks_count.get(user_id, 1) - 1)
             asyncio.create_task(process_user_queue(user_id))
-
     elif q.qsize() < MAX_QUEUE_PER_USER:
         await q.put((message, url))
     else:
@@ -246,14 +256,14 @@ async def handle_group_message(message: Message):
     text = message.text or message.caption or ""
     m = URL_RX.search(text)
     if m and not EXCLUDE_RX.search(m.group(0)):
-        asyncio.create_task(enqueue_request(message, text.strip()))
+        asyncio.create_task(enqueue_request(message, m.group(0)))
 
 @dp.channel_post()
 async def handle_channel_post(message: Message):
     text = message.text or message.caption or ""
     m = URL_RX.search(text)
     if m and not EXCLUDE_RX.search(m.group(0)):
-        asyncio.create_task(enqueue_request(message, text.strip()))
+        asyncio.create_task(enqueue_request(message, m.group(0)))
 
 @dp.message(F.chat.type == ChatType.PRIVATE)
 async def handle_private(message: Message):
@@ -261,7 +271,7 @@ async def handle_private(message: Message):
     m = URL_RX.search(text)
     
     if m and not EXCLUDE_RX.search(m.group(0)):
-        asyncio.create_task(enqueue_request(message, text.strip()))
+        asyncio.create_task(enqueue_request(message, m.group(0)))
     else:
         uid = message.from_user.id
         idx = user_tracker.get(uid, 0)
