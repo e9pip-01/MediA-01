@@ -40,13 +40,47 @@ TOO_LARGE_MESSAGE = "عيرك طويل هواي دادي وكسي مايكدر\n
 ALBUM_SUCCESS_MESSAGE = "تم تنفيذ طلبك تاج راسي العظيم تدلل\nمنو اطيع من بعدك"
 
 BUTTONS_CONFIG = {
-    "developer": {"text": "المطور", "url": "tg://user?id=8859860635"},
-    "salwa": {"text": "سلوى", "url": "tg://user?id=8800673233"},
-    "join": {"text": "انضموا", "url": "https://t.me/+9frtf-UePGU4NTk5"},
-    "share": {"text": "المشاركة", "url": "https://t.me/share/url?url=https://t.me/+9frtf-UePGU4NTk5"}
+    "developer": {"text": "المطور", "url": "tg://user?id=8859860635", "style": "primary"},
+    "salwa": {"text": "سلوى", "url": "tg://user?id=8800673233", "style": "success"},
+    "join": {"text": "انضموا", "url": "https://t.me/+9frtf-UePGU4NTk5", "style": "danger"},
+    "share": {"text": "المشاركة", "url": "https://t.me/share/url?url=https://t.me/+9frtf-UePGU4NTk5", "style": "default"}
 }
 
 sequence_index = 0
+
+EMOJIS_LIST = ["😁", "😡", "🌭", "😭", "😘", "🍓", "🤣", "🥰"]
+TIMES_LIST = [2.4, 4.2, 4.8, 3.6, 3.2, 2.3]
+
+current_emojis_pool = []
+current_times_pool = []
+
+def get_next_emoji() -> str:
+    global current_emojis_pool
+    if not current_emojis_pool:
+        current_emojis_pool = EMOJIS_LIST.copy()
+        random.shuffle(current_emojis_pool)
+    return current_emojis_pool.pop()
+
+def get_next_time() -> float:
+    global current_times_pool
+    if not current_times_pool:
+        current_times_pool = TIMES_LIST.copy()
+        random.shuffle(current_times_pool)
+    return current_times_pool.pop()
+
+async def apply_delayed_reaction(chat_id: int, message_id: int):
+    delay = get_next_time()
+    emoji = get_next_emoji()
+    await asyncio.sleep(delay)
+    try:
+        await bot.set_message_reaction(
+            chat_id=chat_id,
+            message_id=message_id,
+            reaction=[types.ReactionTypeEmoji(emoji=emoji)],
+            is_big=False
+        )
+    except Exception:
+        pass
 
 def get_next_keyboard() -> InlineKeyboardMarkup:
     global sequence_index
@@ -56,7 +90,8 @@ def get_next_keyboard() -> InlineKeyboardMarkup:
     sequence_index = (sequence_index + 1) % len(flow)
     button = InlineKeyboardButton(
         text=btn_info["text"],
-        url=btn_info["url"]
+        url=btn_info["url"],
+        style=btn_info.get("style")
     )
     return InlineKeyboardMarkup(inline_keyboard=[[button]])
 
@@ -111,6 +146,7 @@ async def send_startup_notification():
                 text=STARTUP_MESSAGE, 
                 reply_markup=get_next_keyboard()
             )
+            asyncio.create_task(apply_delayed_reaction(msg.chat.id, msg.message_id))
             await send_welcome_sticker_if_exists(admin_id, msg.message_id)
         except Exception:
             pass
@@ -133,11 +169,14 @@ async def download_and_send(message: Message, url: str, user_id: int):
                     media_group = [InputMediaDocument(media=item['file_id']) for item in media_group_ids]
                     sent_group = await message.reply_media_group(media=media_group)
                     for m in sent_group:
+                        asyncio.create_task(apply_delayed_reaction(m.chat.id, m.message_id))
                         await send_welcome_sticker_if_exists(m.chat.id, m.message_id)
                 last_msg = await message.reply(ALBUM_SUCCESS_MESSAGE, reply_markup=get_next_keyboard())
+                asyncio.create_task(apply_delayed_reaction(last_msg.chat.id, last_msg.message_id))
                 await send_welcome_sticker_if_exists(last_msg.chat.id, last_msg.message_id)
             else:
                 status = await message.reply("يتم تنفيذ طلبك تاج راسي العظيم تدلل\nراح يوصل هسا", reply_markup=get_next_keyboard())
+                asyncio.create_task(apply_delayed_reaction(status.chat.id, status.message_id))
                 await send_welcome_sticker_if_exists(status.chat.id, status.message_id)
                 
                 input_media = InputMediaDocument(media=cached_data['file_id'])
@@ -145,14 +184,16 @@ async def download_and_send(message: Message, url: str, user_id: int):
                     media=input_media,
                     reply_markup=get_next_keyboard()
                 )
+                asyncio.create_task(apply_delayed_reaction(sent_doc.chat.id, sent_doc.message_id))
                 await send_welcome_sticker_if_exists(sent_doc.chat.id, sent_doc.message_id)
             return
         except Exception:
             await redis_client.delete(f"cache:{url}")
 
     status = await message.reply("يتم تنفيذ طلبك تاج راسي العظيم تدلل\nراح يوصل هسا", reply_markup=get_next_keyboard())
+    asyncio.create_task(apply_delayed_reaction(status.chat.id, status.message_id))
     await send_welcome_sticker_if_exists(status.chat.id, status.message_id)
-        
+    
     loop = asyncio.get_running_loop()
     temp_dir_to_clean = None
     last_update_time = loop.time()
@@ -245,6 +286,7 @@ async def download_and_send(message: Message, url: str, user_id: int):
                 media=input_media,
                 reply_markup=get_next_keyboard()
             )
+            asyncio.create_task(apply_delayed_reaction(sent_doc.chat.id, sent_doc.message_id))
             await send_welcome_sticker_if_exists(sent_doc.chat.id, sent_doc.message_id)
             
             file_id = sent_doc.document.file_id
@@ -259,12 +301,14 @@ async def download_and_send(message: Message, url: str, user_id: int):
                 if media_group:
                     sent_group = await message.reply_media_group(media=media_group)
                     for m in sent_group:
+                        asyncio.create_task(apply_delayed_reaction(m.chat.id, m.message_id))
                         await send_welcome_sticker_if_exists(m.chat.id, m.message_id)
                     
                     group_info = [{'file_id': m.document.file_id} for m in sent_group if m.document]
                     album_cache_data.append(group_info)
             
             last_msg = await message.reply(ALBUM_SUCCESS_MESSAGE, reply_markup=get_next_keyboard())
+            asyncio.create_task(apply_delayed_reaction(last_msg.chat.id, last_msg.message_id))
             await send_welcome_sticker_if_exists(last_msg.chat.id, last_msg.message_id)
             if album_cache_data:
                 await redis_client.set(f"cache:{url}", orjson.dumps(album_cache_data).decode('utf-8'))
@@ -272,6 +316,7 @@ async def download_and_send(message: Message, url: str, user_id: int):
     except Exception:
         try:
             err_msg = await status.edit_text(ERROR_MESSAGE, reply_markup=get_next_keyboard())
+            asyncio.create_task(apply_delayed_reaction(err_msg.chat.id, err_msg.message_id))
             await send_welcome_sticker_if_exists(err_msg.chat.id, err_msg.message_id)
         except Exception:
             pass
@@ -330,21 +375,22 @@ async def send_user_welcome_msg(message: Message):
     idx = int(await redis_client.get(f"tracker:{uid}") or 0)
     
     rep_msg = await message.reply(WELCOME_MSGS[idx], reply_markup=get_next_keyboard())
+    asyncio.create_task(apply_delayed_reaction(rep_msg.chat.id, rep_msg.message_id))
     await send_welcome_sticker_if_exists(rep_msg.chat.id, rep_msg.message_id)
     
     next_idx = (idx + 1) % len(WELCOME_MSGS)
     await redis_client.set(f"tracker:{uid}", next_idx)
 
-async def can_manage_stickers(message: Message) -> bool:
-    chat = message.chat
+async def can_manage_stickers(chat: types.Chat, user_id: int) -> bool:
+    if not user_id:
+        return False
+
     if chat.type == ChatType.PRIVATE:
-        return message.from_user and message.from_user.id in ADMIN_IDS
+        return user_id in ADMIN_IDS
 
     if chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
-        if not message.from_user:
-            return False
         try:
-            member = await bot.get_chat_member(chat.id, message.from_user.id)
+            member = await bot.get_chat_member(chat.id, user_id)
             return member.status in [ChatMemberStatus.CREATOR, ChatMemberStatus.ADMINISTRATOR]
         except Exception:
             return False
@@ -354,9 +400,10 @@ async def can_manage_stickers(message: Message) -> bool:
 
     return False
 
-@dp.message(F.text == "ستيكر الويلكوم")
+@dp.message(F.text == "ستيكر ويلكوم")
 async def start_welcome_sticker_mode(message: Message):
-    if not await can_manage_stickers(message):
+    user_id = message.from_user.id if message.from_user else 0
+    if not await can_manage_stickers(message.chat, user_id):
         return
 
     chat_id = message.chat.id
@@ -368,6 +415,7 @@ async def start_welcome_sticker_mode(message: Message):
     
     text = "¹# - ارسل الان الملصق لاضافته مع رسائل\nالبوت"
     sent_msg = await message.reply(text)
+    asyncio.create_task(apply_delayed_reaction(sent_msg.chat.id, sent_msg.message_id))
     await redis_client.set(f"last_sticker_msg:{chat_id}", sent_msg.message_id)
 
 @dp.message(F.sticker)
@@ -378,7 +426,8 @@ async def handle_incoming_sticker(message: Message):
     if not is_mode_active:
         return
 
-    if not await can_manage_stickers(message):
+    user_id = message.from_user.id if message.from_user else 0
+    if not await can_manage_stickers(message.chat, user_id):
         return
 
     sticker_file_id = message.sticker.file_id
@@ -401,22 +450,18 @@ async def handle_incoming_sticker(message: Message):
     
     text = "¹# - الملصق اللذي ارسلته اصبح مضاف مع\nرسائل الويلكوم"
     new_msg = await message.reply(text, reply_markup=keyboard)
+    asyncio.create_task(apply_delayed_reaction(new_msg.chat.id, new_msg.message_id))
     await redis_client.set(f"last_sticker_msg:{chat_id}", new_msg.message_id)
 
 @dp.callback_query(F.data == "finish_stickers")
 async def finish_stickers_callback(callback: CallbackQuery):
-    chat_id = callback.message.chat.id
+    chat = callback.message.chat
+    user_id = callback.from_user.id if callback.from_user else 0
     
-    dummy_msg = Message(
-        message_id=callback.message.message_id,
-        date=callback.message.date,
-        chat=callback.message.chat,
-        from_user=callback.from_user
-    )
-    if not await can_manage_stickers(dummy_msg):
-        await callback.answer("غير مصرح لك بهذا الإجراء", show_alert=True)
+    if not await can_manage_stickers(chat, user_id):
         return
 
+    chat_id = chat.id
     await redis_client.delete(f"sticker_mode:{chat_id}")
     await redis_client.delete(f"last_sticker_msg:{chat_id}")
 
@@ -435,6 +480,7 @@ async def handle_group_message(message: Message):
     if m and not EXCLUDE_RX.search(m.group(0)):
         asyncio.create_task(enqueue_request(message, m.group(0)))
     elif "بوت" in text:
+        asyncio.create_task(apply_delayed_reaction(message.chat.id, message.message_id))
         await send_user_welcome_msg(message)
 
 @dp.channel_post()
@@ -444,10 +490,12 @@ async def handle_channel_post(message: Message):
     if m and not EXCLUDE_RX.search(m.group(0)):
         asyncio.create_task(enqueue_request(message, m.group(0)))
     elif "بوت" in text:
+        asyncio.create_task(apply_delayed_reaction(message.chat.id, message.message_id))
         await send_user_welcome_msg(message)
 
 @dp.message(F.chat.type == ChatType.PRIVATE)
 async def handle_private(message: Message):
+    asyncio.create_task(apply_delayed_reaction(message.chat.id, message.message_id))
     text = message.text or ""
     m = URL_RX.search(text)
     
