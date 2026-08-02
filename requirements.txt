@@ -1,5 +1,4 @@
 aiogram
-yt-dlp
 aiodns
 pycares
 faust-cchardet
@@ -9,3 +8,4 @@ brotli
 certifi
 dnspython
 redis
+ffmpeg-python
